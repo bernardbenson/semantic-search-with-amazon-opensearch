@@ -1,0 +1,4 @@
+requests
+urllib3<2
+opensearch-py
+requests-aws4auth
