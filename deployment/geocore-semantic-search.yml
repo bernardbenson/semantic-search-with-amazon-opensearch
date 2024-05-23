@@ -239,7 +239,7 @@ Resources:
   RestApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: search
+      Name: search-opensearch
       AccessLogSetting:
         DestinationArn: !GetAtt LogGroup.Arn
         Format: '<request id="$context.requestId"> <ip>$context.identity.sourceIp</ip> <caller>$context.identity.caller</caller> <user>$context.identity.user</user> <requestTime>$context.requestTime</requestTime> <httpMethod>$context.httpMethod</httpMethod> <resourcePath>$context.resourcePath</resourcePath> <status>$context.status</status> <protocol>$context.protocol</protocol> <responseLength>$context.responseLength</responseLength><errorMessage>$context.error.message</errorMessage></request>'
@@ -250,11 +250,11 @@ Resources:
       DefinitionBody:
         swagger: '2.0'
         info:
-          title: 'search'
+          title: 'search-opensearch'
         schemes:
           - 'https'
         paths:
-          /search:
+          /search-opensearch:
             get:
               consumes:
               - "application/json"
@@ -263,12 +263,12 @@ Resources:
               responses: #Method response:https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-apigateway-method-methodresponse.html
                 "200":
                   description: "200 response"
-                  schema:
-                    $ref: "#/definitions/Empty"
+                  # schema:
+                  #   $ref: "#/definitions/Empty"
                   headers:
                     Access-Control-Allow-Origin:
                       type: "string"
-              x-amazon-apigateway-integration: #Integration response:https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-apigateway-method-integration.html
+              x-amazon-apigateway-integration: #Integration response:https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-specification-api-gateway-extensions.html
                 type: aws_proxy
                 httpMethod: POST
                 uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${InvokeSagemakerEndpointPretrain.Arn}/invocations'
@@ -280,8 +280,8 @@ Resources:
                 requestTemplates:
                   application/json: "{\r\n    \"method\" : \"$input.params('method')\",\r\n\
                     \    \"searchString\" : \"$input.params('searchString')\"}"
-                  passthroughBehavior: "when_no_templates"
-                  contentHandling: "CONVERT_TO_TEXT"
+                  #passthroughBehavior: "when_no_templates"
+                  #contentHandling: "CONVERT_TO_TEXT"
             options:
               consumes:
               - "application/json"
@@ -290,8 +290,8 @@ Resources:
               responses:
                 "200":
                   description: "200 response"
-                  schema:
-                    $ref: "#/definitions/Empty"
+                  # schema:
+                  #   $ref: "#/definitions/Empty"
                   headers:
                     Access-Control-Allow-Origin:
                       type: "string"
@@ -310,11 +310,11 @@ Resources:
                       method.response.header.Access-Control-Allow-Origin: "'*'"
                 requestTemplates:
                   application/json: "{\"statusCode\": 200}"
-                passthroughBehavior: "when_no_match"       
-          definitions:
-            Empty:
-              type: "object"
-              title: "Empty Schema"
+                # passthroughBehavior: "when_no_match"       
+          # definitions:
+          #   Empty:
+          #     type: "object"
+          #     title: "Empty Schema"
           x-amazon-apigateway-gateway-responses:                 
             DEFAULT_4XX:
               responseParameters:
