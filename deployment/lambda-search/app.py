@@ -81,7 +81,7 @@ def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='nlp
     # query_result_df = pd.DataFrame(data=query_result,columns=["_id","_score","title",'uuid'])
     # return query_result_df
 
-    api_response = create_api_response(res)
+    api_response = create_api_response_geojson(res)
     return api_response 
 
 def text_search_keywords(payload, os_client, k=30,idx_name='nlp_knn'):
@@ -117,7 +117,7 @@ def text_search_keywords(payload, os_client, k=30,idx_name='nlp_knn'):
     # query_result_df = pd.DataFrame(data=query_result,columns=["_id","_score","title",'uuid'])
     # return query_result_df
     
-    api_response = create_api_response(res)
+    api_response = create_api_response_geojson(res)
     return api_response 
 
 def add_to_top_of_dict(original_dict, key, value):
@@ -136,34 +136,23 @@ def add_to_top_of_dict(original_dict, key, value):
     return new_dict
 
 # def create_api_response(search_results):
-#     """
-#     Creates an API response from the search results.
-    
-#     :param search_results: The search results returned by Elasticsearch/OpenSearch.
-#     :return: A list of items with added metadata (total, relevancy, and row number).
-#     """
-#     items = []
-#     total_hits = len(search_results['hits']['hits'])
+#     response = {
+#         "total_hits": len(search_results['hits']['hits']),
+#         "items": []
+#     }
     
 #     for count, hit in enumerate(search_results['hits']['hits'], start=1):
 #         try:
-#             # Extract the source data
-#             source_data = hit['_source']
-            
-#             # Check and delete 'vector' key if it exists
-#             source_data.pop('vector', None)  # Remove 'vector' key without raising an error if it's not present
-        
-#             # Add custom metadata to the source data
-#             source_data = add_to_top_of_dict(source_data, 'total', total_hits)
+#             source_data = hit['_source'].copy()
+#             source_data.pop('vector', None)
 #             source_data = add_to_top_of_dict(source_data, 'relevancy', hit.get('_score', ''))
 #             source_data = add_to_top_of_dict(source_data, 'row_num', count)
-            
-#             items.append(source_data)
+#             response["items"].append(source_data)
 #         except Exception as e:
 #             print(f"Error processing hit: {e}")
-    
-#     return items
-def create_api_response(search_results):
+#     return response
+
+def create_api_response_geojson(search_results):
     response = {
         "total_hits": len(search_results['hits']['hits']),
         "items": []
@@ -175,11 +164,25 @@ def create_api_response(search_results):
             source_data.pop('vector', None)
             source_data = add_to_top_of_dict(source_data, 'relevancy', hit.get('_score', ''))
             source_data = add_to_top_of_dict(source_data, 'row_num', count)
-            response["items"].append(source_data)
+            
+            #Get geometry and delete geometry from the source_data
+            geometry = source_data.get('geometry')
+            source_data.pop('geometry')
+            #Create the GeoJson object 
+            feature_collection = {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": geometry,
+                            "properties": source_data
+                        }
+                    ]
+                }
+            response["items"].append(feature_collection)    
         except Exception as e:
             print(f"Error processing hit: {e}")
     return response
-
 def lambda_handler(event, context):
     """
     /postText: Uses semantic search to find similar records based on vector similarity.
