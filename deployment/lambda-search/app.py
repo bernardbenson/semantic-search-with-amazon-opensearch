@@ -24,14 +24,13 @@ def get_awsauth_from_secret(region, secret_id):
         response = client.get_secret_value(SecretId=secret_id)
         secret = json.loads(response['SecretString'])
         
-        master_username = secret['MASTER_USERNAME']
-        master_password = secret['MASTER_PASSWORD']
+        master_username = secret['username']
+        master_password = secret['password']
 
         return (master_username, master_password)
     except Exception as e:
         print(f"Error retrieving secret: {e}")
         return None
-        
         
 def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
     """Invoke a SageMaker endpoint to get embedding with ContentType='text/plain'."""
@@ -53,16 +52,17 @@ def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
         print(f"Error invoking SageMaker endpoint {sagemaker_endpoint}: {e}")
         
 
-def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='nlp_knn'):
+def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='minilm-pretrain-knn'):
     """
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
     """
-    query={"size": k_neighbors,
-            "query": {
-                "knn": {
-                    "vector":{
-                        "vector":features,
+    query={
+        "size": k_neighbors,
+        "query": {
+            "knn": {
+                "vector":{
+                    "vector":features,
                         "k":k_neighbors
                         }
                    }
@@ -82,9 +82,10 @@ def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='nlp
     # return query_result_df
 
     api_response = create_api_response_geojson(res)
+    #api_response = create_api_response(res)
     return api_response 
 
-def text_search_keywords(payload, os_client, k=30,idx_name='nlp_knn'):
+def text_search_keywords(payload, os_client, k=30,idx_name='minilm-pretrain-knn'):
     """
     Keyword search of the payload string 
     """
@@ -135,22 +136,22 @@ def add_to_top_of_dict(original_dict, key, value):
 
     return new_dict
 
-# def create_api_response(search_results):
-#     response = {
-#         "total_hits": len(search_results['hits']['hits']),
-#         "items": []
-#     }
+def create_api_response(search_results):
+    response = {
+        "total_hits": len(search_results['hits']['hits']),
+        "items": []
+    }
     
-#     for count, hit in enumerate(search_results['hits']['hits'], start=1):
-#         try:
-#             source_data = hit['_source'].copy()
-#             source_data.pop('vector', None)
-#             source_data = add_to_top_of_dict(source_data, 'relevancy', hit.get('_score', ''))
-#             source_data = add_to_top_of_dict(source_data, 'row_num', count)
-#             response["items"].append(source_data)
-#         except Exception as e:
-#             print(f"Error processing hit: {e}")
-#     return response
+    for count, hit in enumerate(search_results['hits']['hits'], start=1):
+        try:
+            source_data = hit['_source'].copy()
+            source_data.pop('vector', None)
+            source_data = add_to_top_of_dict(source_data, 'relevancy', hit.get('_score', ''))
+            source_data = add_to_top_of_dict(source_data, 'row_num', count)
+            response["items"].append(source_data)
+        except Exception as e:
+            print(f"Error processing hit: {e}")
+    return response
 
 def create_api_response_geojson(search_results):
     response = {
@@ -166,8 +167,8 @@ def create_api_response_geojson(search_results):
             source_data = add_to_top_of_dict(source_data, 'row_num', count)
             
             #Get geometry and delete geometry from the source_data
-            geometry = source_data.get('geometry')
-            source_data.pop('geometry')
+            geometry = source_data.get('coordinates')
+            source_data.pop('coordinates')
             #Create the GeoJson object 
             feature_collection = {
                     "type": "FeatureCollection",
@@ -179,10 +180,13 @@ def create_api_response_geojson(search_results):
                         }
                     ]
                 }
+    
+                
             response["items"].append(feature_collection)    
         except Exception as e:
-            print(f"Error processing hit: {e}")
+            print(f"Error processing hit: {hit} - {e}")
     return response
+    
 def lambda_handler(event, context):
     """
     /postText: Uses semantic search to find similar records based on vector similarity.
@@ -197,7 +201,7 @@ def lambda_handler(event, context):
         connection_class=RequestsHttpConnection
     )
     
-    k = 10
+    k =10
     payload = event['searchString']
     
 
@@ -205,7 +209,8 @@ def lambda_handler(event, context):
         print(f'This is paylaod {payload}')
         
         features = invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region)
-        semantic_search = semantic_search_neighbors(features, os_client, k_neighbors=k, idx_name='nlp_knn')
+        print(sagemaker_endpoint)
+        semantic_search = semantic_search_neighbors(features, os_client, k_neighbors=k, idx_name='minilm-pretrain-knn')
         print(f'Type of the semantic response is {type(json.dumps(semantic_search))}')
         print(json.dumps(semantic_search))
         
@@ -215,7 +220,7 @@ def lambda_handler(event, context):
             }
           
     else:
-        search = text_search_keywords(payload, os_client, k,idx_name='nlp_knn')
+        search = text_search_keywords(payload, os_client, k,idx_name='minilm-pretrain-knn')
 
         return {
             "statusCode": 200,
