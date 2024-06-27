@@ -16,14 +16,15 @@ def get_awsauth_from_secret(region, secret_id):
     try:
         response = client.get_secret_value(SecretId=secret_id)
         secret = json.loads(response['SecretString'])
-
-        master_username = secret['MASTER_USERNAME']
-        master_password = secret['MASTER_PASSWORD']
+        
+        master_username = secret['username']
+        master_password = secret['password']
 
         return (master_username, master_password)
     except Exception as e:
         print(f"Error retrieving secret: {e}")
         return None
+        
 
 def create_opensearch_connection(aos_host, awsauth):
     try:
@@ -34,6 +35,9 @@ def create_opensearch_connection(aos_host, awsauth):
             use_ssl=True,
             verify_certs=True,
             connection_class=RequestsHttpConnection
+            # timeout=60,  # Set a higher timeout value
+            # max_retries=10,  # Increase the number of retries
+            # retry_on_timeout=True
         )
         # Print the client to confirm the connection
         print("Connection to OpenSearch established:", aos_client)
@@ -85,13 +89,20 @@ def load_data_to_opensearch_index(df_en, aos_client, index_name, log_level="INFO
 
     # Convert DataFrame to a list of dictionaries (JSON)
     json_en = df_en.to_dict("records")
+    
+    # check if vector has null values 
+    vectors = [item['vector'] for item in json_en]
+    import numpy as np 
+    array = np.array(vectors, dtype=object)
+    has_null = np.any(array == None)
+    print(f"vector has null values: {has_null}")
 
     # Index the data
     for x in tqdm(json_en, desc="Indexing Records"):
         try:
             bounding_box = json.loads(x.get('features_geometry_coordinates', '[]'))
             coordinates = {
-                "type": "polygon",
+                "type": "Polygon",
                 "coordinates": bounding_box
             }
 
@@ -126,8 +137,9 @@ def load_data_to_opensearch_index(df_en, aos_client, index_name, log_level="INFO
 
         except Exception as e:
             print(e)
-
-    # Final record count check (Optional, can slow down the script if the index is large)
-    res = aos_client.search(index=index_name, body={"query": {"match_all": {}}})
-    total_time = time.time() - start_time
-    print(f"Completed indexing. Records loaded into the index {index_name}: {res['hits']['total']['value']}. Total time taken: {total_time:.2f} seconds.")
+    # Final record count check
+    try:
+        res = client.search(index=index_name, body={"query": {"match_all": {}}})
+        print(f"Total documents in index: {res['hits']['total']['value']}")
+    except Exception as e:
+        print(f"Error retrieving document count: {e}")

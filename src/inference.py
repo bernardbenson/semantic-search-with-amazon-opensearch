@@ -1,17 +1,13 @@
-import argparse
 import logging
-import sagemaker_containers
 import requests
 
-import os
-import json
-import io
-import time
+# import os
+# import json
+# import io
+# import time
 import torch
 from transformers import AutoTokenizer, AutoModel
 import torch.nn.functional as F
-
-# from sentence_transformers import models, losses, SentenceTransformer
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

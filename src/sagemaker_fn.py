@@ -18,16 +18,10 @@ def list_sagemaker_endpoints():
     except Exception as e:
         print(f"Error listing SageMaker endpoints: {e}")
 
-
-def invoke_sagemaker_endpoint_ft(endpoint_name, payload, finetuned=True):
+def invoke_sagemaker_endpoint_ft(endpoint_name, payload):
     """Invoke a SageMaker endpoint to get predictions with ContentType='application/json'."""
     # Initialize the runtime SageMaker client
     runtime_client = boto3.client('runtime.sagemaker', region_name='ca-central-1')  
-    if finetuned: 
-        ContentType='application/json',
-    else: 
-        ContentType='text/plain',
-
     try:
         """
         if not isinstance(payload, str):
@@ -36,7 +30,7 @@ def invoke_sagemaker_endpoint_ft(endpoint_name, payload, finetuned=True):
         # Invoke the SageMaker endpoint
         response = runtime_client.invoke_endpoint(
             EndpointName=endpoint_name,
-            ContentType=ContentType,
+            ContentType='application/json',
             Body=json.dumps(payload)
         )
         # Decode the response
@@ -46,7 +40,31 @@ def invoke_sagemaker_endpoint_ft(endpoint_name, payload, finetuned=True):
     except Exception as e:
         print(f"Error invoking SageMaker endpoint {endpoint_name}: {e}")
 
+def invoke_sagemaker_endpoint_pretrain(endpoint_name, payload):
+    """Invoke a SageMaker endpoint to get predictions with ContentType='text/plain'."""
+    # Initialize the runtime SageMaker client
+    runtime_client = boto3.client('runtime.sagemaker', region_name='ca-central-1')  
 
+    try:
+        # Ensure payload is a string, since ContentType is 'text/plain'
+        if not isinstance(payload, str):
+            payload = str(payload)
+        
+        # Invoke the SageMaker endpoint
+        response = runtime_client.invoke_endpoint(
+            EndpointName=endpoint_name,
+            ContentType='text/plain',
+            Body=payload
+        )
+        
+        # Decode the response
+        result = json.loads(response['Body'].read().decode())
+        return (result)
+        #print(f"Prediction from {endpoint_name}: {result}")
+    except Exception as e:
+        print(f"Error invoking SageMaker endpoint {endpoint_name}: {e}")
+    
+    
 def deploy_huggingface_model(model_path, key_prefix, transformers_version="4.26", pytorch_version="1.13", py_version="py39", instance_type="ml.t2.medium", endpoint_name="all-mpnet-base-v2-mpf-huggingface-test"):
     """
     Deploys a Hugging Face model to SageMaker.
