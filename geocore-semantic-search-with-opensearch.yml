@@ -45,14 +45,9 @@ Parameters:
     NoEcho: 'true'
     Type: String
     Default: Semantic123!
-#Todo: change OSEndpoint to a resource that can be referenced 
-  OSEndpoint:
-    Type: String
-    Default: search-semantic-search-dfcizxxxuj62dusl5skmeu3czu.ca-central-1.es.amazonaws.com
-    Description: OpenSearch endpoint 
   OSSecretID:
     Type: String
-    Default: !Sub '${Environment}/OpenSearch/SemanticSearch'
+    Default: /webpresence/search/opensearch-secret
     Description: SSM parameter name for OpenSearch user name and password   
 
 
@@ -80,8 +75,8 @@ Resources:
       EngineVersion: 'OpenSearch_2.11'
       DomainName: semantic-search
       ClusterConfig:
-        #InstanceType: "r6g.2xlarge.search"
-        InstanceType: "t3.medium.search"
+        InstanceType: "m6g.large.search"
+        #InstanceType: "t3.medium.search"
       EBSOptions:
         EBSEnabled: True
         VolumeSize: 20
@@ -123,7 +118,7 @@ Resources:
     Type: AWS::SageMaker::NotebookInstance
     Properties:
       NotebookInstanceName: semantic-search-nb
-      InstanceType: ml.t3.medium
+      InstanceType: ml.t3.2xlarge
       RoleArn: !GetAtt NBRole.Arn
       DefaultCodeRepository: !GetAtt CodeRepository.CodeRepositoryName
 
@@ -207,12 +202,12 @@ Resources:
 # Lambda Function: invoke sagemaker model endpoints
 # and perfrom KNN search in the OpenSearch domain 
 ########################################################
-  InvokeSagemakerEndpointPretrain:
+  LambdaSearch:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: 
         Bucket: !Ref DeploymentBucket
-        Key: cloudformation-templates/lambda/semantic-search/Invoke-sagemaker-pretrain-20240508-2200.zip
+        Key: cloudformation-templates/lambda/semantic-search/LambdaSearch-2024062701430.zip
 
       MemorySize: 512
       Timeout: 900
@@ -225,11 +220,11 @@ Resources:
       Environment:
         Variables:
           MY_AWS_REGION: ca-central-1
-          OS_ENDPOINT:  !Ref OSEndpoint
+          OS_ENDPOINT:  !ImportValue OpenSearchEndpoint
           OS_SECRET_ID: !Ref OSSecretID
           SAGEMAKER_ENDPOINT: !Ref SagemakerEndpoint
       PackageType: Zip
-      Role: !GetAtt InvokeSagemakerLambdaExecutionRole.Arn
+      Role: !GetAtt LambdaSearchExecutionRole.Arn
       Events:
         ApiEvent:
           Type: Api
@@ -238,7 +233,7 @@ Resources:
             Path: /*
             Method: any
 
-  InvokeSagemakerLambdaExecutionRole:
+  LambdaSearchExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -249,7 +244,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: InvokeSagemakerLambdaExecutionPolicy
+        - PolicyName: LambdaSearchExecutionPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -429,7 +424,7 @@ Resources:
               x-amazon-apigateway-integration: #Integration response:https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-specification-api-gateway-extensions.html
                 type: aws_proxy
                 httpMethod: POST
-                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${InvokeSagemakerEndpointPretrain.Arn}/invocations'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaSearch.Arn}/invocations'
                 responses: 
                   default:
                     statusCode: "200"
@@ -484,7 +479,25 @@ Resources:
                 gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
                 gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
                 gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                           
+
+Outputs:
+  OpenSearchEndpoint:
+    Description: OpenSearch domain endpoint
+    Value: !GetAtt OpenSearchDomain.DomainEndpoint
+    Export:
+      Name: OpenSearchEndpoint
+
+  OpenSearchDomainName:
+    Description: OpenSearch domain name
+    Value: !Ref OpenSearchServiceDomain
+
+  Region:
+    Description: Deployed Region
+    Value: !Ref AWS::Region
+
+  OpenSearchSecret:
+    Description: Name of the OpenSearch secret in Secrets Manager
+    Value: !Ref OpenSearchSecret
 
 
   LogGroup:
@@ -493,3 +506,4 @@ Resources:
       ServiceToken: !ImportValue LogGroupHelperLambdaArn
       LogGroupName: !Sub '/${Environment}/webpresence/search'
       RetentionInDays: 3653
+
