@@ -75,6 +75,8 @@ def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name=mode
             }
         }
     }
+
+    print(query)
     
     res = os_client.search(
         request_timeout=55, 
@@ -216,14 +218,45 @@ def lambda_handler(event, context):
     
     # Extract filters from the event input
     province_filter = event.get('province', None)
-    organization_filter = event.get('organization', None)
+    organization_filter = event.get('org', None)
     metadata_source_filter = event.get('metadata_source', None)
+
+    # Convert filter string into list (handle multi-selection of filters) 
+    organization_list = [org.strip() for org in organization_filter.split(",")]
     
     filters = []
     if province_filter:
         filters.append({"term": {"province.keyword": province_filter}})
-    if organization_filter:
-        filters.append({"term": {"organization.keyword": organization_filter}})
+    if organization_list:
+        filters.append({
+            "bool": {
+                "should": [
+                    {
+                        "bool": {
+                            "should": [
+                                {
+                                    "wildcard": {
+                                        "contact.organisation.en.keyword": {
+                                            "value": f"*{org}*"
+                                        }
+                                    }
+                                },
+                                {
+                                    "wildcard": {
+                                        "contact.organisation.fr.keyword": {
+                                            "value": f"*{org}*"
+                                        }
+                                    }
+                                }
+                            ],
+                            "minimum_should_match": 1
+                        }
+                    }
+                    for org in organization_list
+                ],
+                "minimum_should_match": 1
+            }
+        })
     if metadata_source_filter:
         filters.append({"term": {"metadata_source.keyword": metadata_source_filter}})
     
