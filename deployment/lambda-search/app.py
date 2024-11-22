@@ -52,7 +52,7 @@ def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
         print(f"Error invoking SageMaker endpoint {sagemaker_endpoint}: {e}")
         
 
-def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='minilm-pretrain-knn'):
+def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='minilm-pretrain-knn', filters=None):
     """
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
@@ -60,19 +60,24 @@ def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='min
     query={
         "size": k_neighbors,
         "query": {
-            "knn": {
-                "vector":{
-                    "vector":features,
-                        "k":k_neighbors
+            "bool": {
+                "must": {
+                    "knn": {
+                        "vector": {
+                            "vector": features,
+                            "k": k_neighbors
                         }
-                   }
-               }
+                    }
+                },
+                "filter": filters if filters else []  # Apply filters
+            }
         }
+    }
+    
     res = os_client.search(
         request_timeout=55, 
         index=idx_name,
         body=query)
-        
     
     # # Return a dataframe of the searched results, including title and uuid 
     # query_result = [
@@ -204,26 +209,51 @@ def lambda_handler(event, context):
     k =10
     payload = event['searchString']
     
-
+    # Debug event
+    print(event)
+    
+    # Extract filters from the event input
+    province_filter = event.get('province', None)
+    organization_filter = event.get('organization', None)
+    metadata_source_filter = event.get('metadata_source', None)
+    
+    filters = []
+    if province_filter:
+        filters.append({"term": {"province.keyword": province_filter}})
+    if organization_filter:
+        filters.append({"term": {"organization.keyword": organization_filter}})
+    if metadata_source_filter:
+        filters.append({"term": {"metadata_source.keyword": metadata_source_filter}})
+    
+    # If no filters are specified, set filters to None
+    filters = filters if filters else None
+    
     if event['method'] == 'SemanticSearch':
-        print(f'This is paylaod {payload}')
+        print(f'This is payload {payload}')
         
         features = invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region)
         print(sagemaker_endpoint)
-        semantic_search = semantic_search_neighbors(features, os_client, k_neighbors=k, idx_name='minilm-pretrain-knn')
+        print(f"Features retrieved from SageMaker: {features}")
+        
+        semantic_search = semantic_search_neighbors(
+            features=features,
+            os_client=os_client,
+            k_neighbors=k,
+            idx_name='minilm-pretrain-knn',
+            filters=filters
+        )
+        
         print(f'Type of the semantic response is {type(json.dumps(semantic_search))}')
         print(json.dumps(semantic_search))
         
-        return  {
+        return {
             "method": "SemanticSearch", 
             "response": semantic_search
-            }
-          
+        }
     else:
         search = text_search_keywords(payload, os_client, k,idx_name='minilm-pretrain-knn')
 
         return {
             "statusCode": 200,
-            "body": json.dumps({"keyword_response": search, 
-                }),
+            "body": json.dumps({"keyword_response": search}),
         }
