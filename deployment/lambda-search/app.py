@@ -12,6 +12,7 @@ region = environ['MY_AWS_REGION']
 aos_host = environ['OS_ENDPOINT'] 
 sagemaker_endpoint = environ['SAGEMAKER_ENDPOINT'] 
 os_secret_id = environ['OS_SECRET_ID']
+model_name = 'minilm-pretrain-knn'
 
 def get_awsauth_from_secret(region, secret_id):
     """
@@ -31,6 +32,7 @@ def get_awsauth_from_secret(region, secret_id):
     except Exception as e:
         print(f"Error retrieving secret: {e}")
         return None
+        
         
 def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
     """Invoke a SageMaker endpoint to get embedding with ContentType='text/plain'."""
@@ -52,7 +54,7 @@ def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
         print(f"Error invoking SageMaker endpoint {sagemaker_endpoint}: {e}")
         
 
-def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='minilm-pretrain-knn', filters=None):
+def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name=model_name, filters=None):
     """
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
@@ -78,6 +80,7 @@ def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='min
         request_timeout=55, 
         index=idx_name,
         body=query)
+        
     
     # # Return a dataframe of the searched results, including title and uuid 
     # query_result = [
@@ -90,7 +93,7 @@ def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name='min
     #api_response = create_api_response(res)
     return api_response 
 
-def text_search_keywords(payload, os_client, k=30,idx_name='minilm-pretrain-knn'):
+def text_search_keywords(payload, os_client, k=30,idx_name=model_name):
     """
     Keyword search of the payload string 
     """
@@ -186,7 +189,6 @@ def create_api_response_geojson(search_results):
                     ]
                 }
     
-                
             response["items"].append(feature_collection)    
         except Exception as e:
             print(f"Error processing hit: {hit} - {e}")
@@ -210,7 +212,7 @@ def lambda_handler(event, context):
     payload = event['searchString']
     
     # Debug event
-    print(event)
+    print("event", event)
     
     # Extract filters from the event input
     province_filter = event.get('province', None)
@@ -239,7 +241,7 @@ def lambda_handler(event, context):
             features=features,
             os_client=os_client,
             k_neighbors=k,
-            idx_name='minilm-pretrain-knn',
+            idx_name=model_name,
             filters=filters
         )
         
@@ -250,8 +252,9 @@ def lambda_handler(event, context):
             "method": "SemanticSearch", 
             "response": semantic_search
         }
+          
     else:
-        search = text_search_keywords(payload, os_client, k,idx_name='minilm-pretrain-knn')
+        search = text_search_keywords(payload, os_client, k,idx_name=model_name)
 
         return {
             "statusCode": 200,
