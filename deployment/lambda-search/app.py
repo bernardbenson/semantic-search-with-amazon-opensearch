@@ -195,6 +195,35 @@ def create_api_response_geojson(search_results):
         except Exception as e:
             print(f"Error processing hit: {hit} - {e}")
     return response
+
+# Load configuration file
+def load_config(file_path="filter_config.json"):
+    """
+        API Gateway
+        "north" : "$input.params('north')",
+        "east" : "$input.params('east')",
+        "south" : "$input.params('south')",
+        "west" : "$input.params('west')",
+        "keyword" : "$input.params('keyword')",
+        "keyword_only" : "$input.params('keyword_only')",
+        "lang" : "$input.params('lang')",
+        "theme" : "$input.params('theme')",
+        "type": "$input.params('type')",
+        "org": "$input.params('org')",
+        "min": "$input.params('min')",
+        "max": "$input.params('max')",
+        "foundational": "$input.params('foundational')" ,
+        "sort": "$input.params('sort')",
+        "source_system": "$input.params('sourcesystemname')" ,
+        "eo_collection": "$input.params('eocollection')" ,
+        "polarization": "$input.params('polarization')" ,
+        "orbit_direction": "$input.params('orbit')",
+        "begin": 2024-11-11T20:30:00.000Z
+        "end": 2024-11-11T20:30:00.000Z
+        "bbox": 48|-121|61|-109
+    """
+    with open(file_path, "r") as file:
+        return json.load(file)
     
 def lambda_handler(event, context):
     """
@@ -216,8 +245,11 @@ def lambda_handler(event, context):
     # Debug event
     print("event", event)
     
+    filter_config = load_config()
+    
+    
+    
     # Extract filters from the event input
-    province_filter = event.get('province', None)
     organization_filter = event.get('org', None)
     metadata_source_filter = event.get('metadata_source', None)
 
@@ -225,38 +257,9 @@ def lambda_handler(event, context):
     organization_list = [org.strip() for org in organization_filter.split(",")]
     
     filters = []
-    if province_filter:
-        filters.append({"term": {"province.keyword": province_filter}})
     if organization_list:
-        filters.append({
-            "bool": {
-                "should": [
-                    {
-                        "bool": {
-                            "should": [
-                                {
-                                    "wildcard": {
-                                        "contact.organisation.en.keyword": {
-                                            "value": f"*{org}*"
-                                        }
-                                    }
-                                },
-                                {
-                                    "wildcard": {
-                                        "contact.organisation.fr.keyword": {
-                                            "value": f"*{org}*"
-                                        }
-                                    }
-                                }
-                            ],
-                            "minimum_should_match": 1
-                        }
-                    }
-                    for org in organization_list
-                ],
-                "minimum_should_match": 1
-            }
-        })
+        organization_fields = config["org"]  # Get field paths from config
+        organization_filters = build_wildcard_filter(organization_fields, organization_filter)
     if metadata_source_filter:
         filters.append({"term": {"metadata_source.keyword": metadata_source_filter}})
     
@@ -293,3 +296,51 @@ def lambda_handler(event, context):
             "statusCode": 200,
             "body": json.dumps({"keyword_response": search}),
         }
+
+def build_wildcard_filter(field_paths, values):
+    """
+    Builds a wildcard filter for multiple field paths and values.
+
+    Args:
+        field_paths (list): List of field paths from configuration.
+        values (str): A comma-separated string of values to filter.
+
+    Returns:
+        list: A list of wildcard filters to be used in a query.
+    """
+    # Split the comma-separated values into a list and strip whitespace
+    value_list = [val.strip() for val in values.split(",") if val.strip()]
+
+    # Build the filters
+    return [
+        {
+            "bool": {
+                "should": [
+                    {"wildcard": {field_path: {"value": f"*{value}*"}}} for field_path in field_paths
+                ],
+                "minimum_should_match": 1
+            }
+        }
+        for value in value_list
+    ]
+
+def build_date_filter(field_name, start_date=None, end_date=None):
+    """
+    Builds a range filter for a date field.
+
+    Args:
+        field_name (str): The name of the date field to filter.
+        start_date (str): The start date (inclusive) in ISO 8601 format.
+        end_date (str): The end date (inclusive) in ISO 8601 format.
+
+    Returns:
+        dict: A range query for the date filter.
+    """
+    range_query = {"range": {field_name: {}}}
+    
+    if start_date:
+        range_query["range"][field_name]["gte"] = start_date
+    if end_date:
+        range_query["range"][field_name]["lte"] = end_date
+    
+    return range_query

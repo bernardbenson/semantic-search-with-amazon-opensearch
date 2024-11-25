@@ -1,0 +1,35 @@
+{
+    "type": [
+        "contact.organisation.en.keyword",
+        "contact.organisation.fr.keyword"
+    ],
+    "theme": [
+        "contact.keywords.en.keyword",
+    ],
+    "org": [
+        "contact.organisation.en.keyword",
+        "contact.organisation.fr.keyword"
+    ],
+    "foundational": [
+        "contact.keywords.en.keyword",
+        "contact.keywords.fr.keyword"
+    ],
+    "source_system": [
+        "systemName.keyword"
+    ],
+    "eo_collection": [
+        "eoCollection.keyword"
+    ],
+    "polarization": [
+        "eoFilters.polarizations.keyword"
+    ],
+    "orbit_direction": [
+        "eoFilters.orbitState.keyword"
+    ],
+    "begin": [
+        "temporalExten.properties.begin"
+    ],
+    "end": [
+        "temporalExten.properties.end"
+    ]
+}
