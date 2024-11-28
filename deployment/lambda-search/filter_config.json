@@ -27,9 +27,9 @@
         "eoFilters.orbitState.keyword"
     ],
     "begin": [
-        "temporalExten.properties.begin"
+        "temporalExtent.properties.begin"
     ],
     "end": [
-        "temporalExten.properties.end"
+        "temporalExtent.properties.end"
     ]
 }

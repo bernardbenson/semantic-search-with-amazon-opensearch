@@ -59,6 +59,7 @@ def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name=mode
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
     """
+    print("Filters:", json.dumps(filters, indent=2))
     query={
         "size": k_neighbors,
         "query": {
@@ -76,7 +77,7 @@ def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name=mode
         }
     }
 
-    print(query)
+    #print(query)
     
     res = os_client.search(
         request_timeout=55, 
@@ -243,35 +244,36 @@ def lambda_handler(event, context):
     payload = event['searchString']
     
     # Debug event
-    print("event", event)
+    #print("event", event)
     
     filter_config = load_config()
-    
-    
-    
+      
     # Extract filters from the event input
     organization_filter = event.get('org', None)
     metadata_source_filter = event.get('metadata_source', None)
 
     # Convert filter string into list (handle multi-selection of filters) 
-    organization_list = [org.strip() for org in organization_filter.split(",")]
+    #organization_list = [org.strip() for org in organization_filter.split(",")]
     
     filters = []
-    if organization_list:
-        organization_fields = config["org"]  # Get field paths from config
-        organization_filters = build_wildcard_filter(organization_fields, organization_filter)
+    if organization_filter:
+        organization_fields = filter_config["org"]  # Get field paths from config
+        #print(build_wildcard_filter(organization_fields, organization_filter))
+        filters.append(build_wildcard_filter(organization_fields, organization_filter))
     if metadata_source_filter:
         filters.append({"term": {"metadata_source.keyword": metadata_source_filter}})
     
     # If no filters are specified, set filters to None
     filters = filters if filters else None
+
+    #print("filters : ", filters)
     
     if event['method'] == 'SemanticSearch':
-        print(f'This is payload {payload}')
+        #print(f'This is payload {payload}')
         
         features = invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region)
-        print(sagemaker_endpoint)
-        print(f"Features retrieved from SageMaker: {features}")
+        #print(sagemaker_endpoint)
+        #print(f"Features retrieved from SageMaker: {features}")
         
         semantic_search = semantic_search_neighbors(
             features=features,
@@ -281,8 +283,8 @@ def lambda_handler(event, context):
             filters=filters
         )
         
-        print(f'Type of the semantic response is {type(json.dumps(semantic_search))}')
-        print(json.dumps(semantic_search))
+        #print(f'Type of the semantic response is {type(json.dumps(semantic_search))}')
+        #print(json.dumps(semantic_search))
         
         return {
             "method": "SemanticSearch", 
@@ -299,30 +301,31 @@ def lambda_handler(event, context):
 
 def build_wildcard_filter(field_paths, values):
     """
-    Builds a wildcard filter for multiple field paths and values.
+    Builds a wildcard OR filter for multiple field paths and values.
 
     Args:
         field_paths (list): List of field paths from configuration.
         values (str): A comma-separated string of values to filter.
 
     Returns:
-        list: A list of wildcard filters to be used in a query.
+        dict: A bool query with should clauses for logical OR.
     """
-    # Split the comma-separated values into a list and strip whitespace
     value_list = [val.strip() for val in values.split(",") if val.strip()]
 
-    # Build the filters
-    return [
-        {
-            "bool": {
-                "should": [
-                    {"wildcard": {field_path: {"value": f"*{value}*"}}} for field_path in field_paths
-                ],
-                "minimum_should_match": 1
-            }
-        }
+    should_clauses = [
+        {"wildcard": {field_path: {"value": f"*{value}*"}}}
         for value in value_list
+        for field_path in field_paths
     ]
+
+    #print(should_clauses)
+
+    return {
+        "bool": {
+            "should": should_clauses,
+            "minimum_should_match": 1
+        }
+    }
 
 def build_date_filter(field_name, start_date=None, end_date=None):
     """
