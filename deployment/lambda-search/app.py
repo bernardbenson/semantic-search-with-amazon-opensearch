@@ -1,9 +1,10 @@
 import json
-from os import environ
-
 import boto3
-from urllib.parse import urlparse
 
+
+from os import environ
+from datetime import datetime
+from urllib.parse import urlparse
 from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth
 from requests_aws4auth import AWS4Auth
 
@@ -252,21 +253,39 @@ def lambda_handler(event, context):
     organization_filter = event.get('org', None)
     metadata_source_filter = event.get('metadata_source', None)
 
+    # Temporal filters
+    start_date_filter = event.get('begin', None)
+    end_date_filter = event.get('end', None)
+
     # Convert filter string into list (handle multi-selection of filters) 
     #organization_list = [org.strip() for org in organization_filter.split(",")]
     
     filters = []
     if organization_filter:
-        organization_fields = filter_config["org"]  # Get field paths from config
-        #print(build_wildcard_filter(organization_fields, organization_filter))
-        filters.append(build_wildcard_filter(organization_fields, organization_filter))
+        organization_field = filter_config["org"]  # Get field paths from config
+        print(organization_field)
+        filters.append(build_wildcard_filter(organization_field, organization_filter))
     if metadata_source_filter:
-        filters.append({"term": {"metadata_source.keyword": metadata_source_filter}})
+        filters.extend({"term": {"metadata_source.keyword": metadata_source_filter}})
+
+    print("filters : ", filters)
     
+    # Temporal filters
+    if start_date_filter and end_date_filter:
+        begin_field = filter_config["begin"][0]
+        end_field = filter_config["end"][0]
+        filters.extend(build_date_filter(begin_field, end_field, start_date=start_date_filter, end_date=end_date_filter))
+    elif start_date_filter:
+        begin_field = filter_config["begin"][0]
+        filters.extend(build_date_filter(begin_field, start_date=start_date_filter))
+    elif end_date_filter:
+        end_field = filter_config["end"][0]
+        filters.extend(build_date_filter(end_field, end_date=end_date_filter))
+
     # If no filters are specified, set filters to None
     filters = filters if filters else None
 
-    #print("filters : ", filters)
+    print("filters : ", filters)
     
     if event['method'] == 'SemanticSearch':
         #print(f'This is payload {payload}')
@@ -318,7 +337,7 @@ def build_wildcard_filter(field_paths, values):
         for field_path in field_paths
     ]
 
-    #print(should_clauses)
+    print(should_clauses)
 
     return {
         "bool": {
@@ -327,23 +346,90 @@ def build_wildcard_filter(field_paths, values):
         }
     }
 
-def build_date_filter(field_name, start_date=None, end_date=None):
+def build_date_filter(begin_field=None, end_field=None, start_date=None, end_date=None):
     """
-    Builds a range filter for a date field.
+    Builds a string-based range filter for date fields supporting partial dates, 'null', 'not available; indisponible', and 'current'.
 
     Args:
-        field_name (str): The name of the date field to filter.
-        start_date (str): The start date (inclusive) in ISO 8601 format.
-        end_date (str): The end date (inclusive) in ISO 8601 format.
+        begin_field (str): Field name for the start date.
+        end_field (str): Field name for the end date.
+        start_date (str): The start date as a string.
+        end_date (str): The end date as a string.
 
     Returns:
-        dict: A range query for the date filter.
+        list: A list of range queries for the provided date fields.
     """
-    range_query = {"range": {field_name: {}}}
-    
-    if start_date:
-        range_query["range"][field_name]["gte"] = start_date
+    date_filters = []
+    current_date = datetime.now().strftime('%Y-%m-%d')  # Current date in YYYY-MM-DD format
+
+    # Handle start date for `gte`
+    if start_date and start_date.lower() not in ['null', 'not available; indisponible']:
+        if len(start_date) == 7:  # YYYY-MM
+            start_date = f"{start_date}-01"  # Assume first day of the month
+        elif len(start_date) == 4:  # YYYY
+            start_date = f"{start_date}-01-01"  # Assume January 1st
+
+        date_filters.append({
+            "range": {
+                begin_field: {
+                    "gte": start_date
+                }
+            }
+        })
+
+    # Handle end date for `lte`
     if end_date:
-        range_query["range"][field_name]["lte"] = end_date
-    
-    return range_query
+        if end_date.lower() in ['null', 'not available; indisponible']:
+            # Optionally exclude these
+            date_filters.append({
+                "term": {
+                    end_field: "null"
+                }
+            })
+        elif end_date.lower() == "present":
+            # Treat 'present' as the current date and handle it separately
+            end_date = current_date
+            date_filters.append({
+                "range": {
+                    end_field: {
+                        "lte": end_date
+                    }
+                }
+            })
+
+            """
+            date_filters.append({
+                "bool": {
+                    "should": [
+                        {
+                            "range": {
+                                end_field: {
+                                    "lte": current_date  # Current date
+                                }
+                            }
+                        },
+                        {
+                            "term": {
+                                end_field: "Present"  # Exact "Present" match
+                            }
+                        }
+                    ]
+                }
+            })
+            """
+        elif len(end_date) == 7:  # YYYY-MM
+            end_date = f"{end_date}-31"  # Assume the last day of the month
+        elif len(end_date) == 4:  # YYYY
+            end_date = f"{end_date}-12-31"  # Assume December 31st
+
+        # Avoid duplicate queries if "present" is handled
+        if end_date.lower() != "present":
+            date_filters.append({
+                "range": {
+                    end_field: {
+                        "lte": end_date
+                    }
+                }
+            })
+
+    return date_filters
