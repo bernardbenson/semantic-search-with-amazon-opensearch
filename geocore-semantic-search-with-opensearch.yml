@@ -431,8 +431,27 @@ Resources:
                     responseParameters:
                       method.response.header.Access-Control-Allow-Origin: "'*'" 
                 requestTemplates:
-                  application/json: "{\r\n    \"method\" : \"$input.params('method')\",\r\n\
-                    \    \"searchString\" : \"$input.params('searchString')\"}"
+                  application/json: |
+                    {
+                      "method": "$input.params('method')",
+                      "searchString": "$input.params('searchString')",
+                      "bbox": "$input.params('bbox')",
+                      "relation": "$input.params('relation')",
+                      "begin": "$input.params('begin')",
+                      "end": "$input.params('end')",
+                      "org": "$input.params('org')",
+                      "type": "$input.params('type')",
+                      "theme": "$input.params('theme')",
+                      "foundational": "$input.params('foundational')",
+                      "source_system": "$input.params('source_system')",
+                      "eo_collection": "$input.params('eo_collection')",
+                      "polarization": "$input.params('polarization')",
+                      "orbit_direction": "$input.params('orbit_direction')",
+                      "lang": "$input.params('lang')",
+                      "sort": "$input.params('sort')",
+                      "size": "$input.params('size')",
+                      "from": "$input.params('from')",
+                    }
                   #passthroughBehavior: "when_no_templates"
                   #contentHandling: "CONVERT_TO_TEXT"
             options:

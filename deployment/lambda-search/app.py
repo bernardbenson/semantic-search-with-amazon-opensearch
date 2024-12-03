@@ -55,14 +55,13 @@ def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
         print(f"Error invoking SageMaker endpoint {sagemaker_endpoint}: {e}")
         
 
-def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name=model_name, filters=None):
+def semantic_search_neighbors(features, os_client, sort_param, k_neighbors=30, from_param=0, idx_name=model_name, filters=None):
     """
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
     """
-    print("Filters:", json.dumps(filters, indent=2))
+    #print("Filters:", json.dumps(filters, indent=2))
     query={
-        "size": k_neighbors,
         "query": {
             "bool": {
                 "must": {
@@ -75,10 +74,13 @@ def semantic_search_neighbors(features, os_client, k_neighbors=30, idx_name=mode
                 },
                 "filter": filters if filters else []  # Apply filters
             }
-        }
+        },
+        "size": k_neighbors,
+        "from": from_param,
+        "sort": sort_param
     }
 
-    #print(query)
+    print(json.dumps(query, indent=2))
     
     res = os_client.search(
         request_timeout=55, 
@@ -241,14 +243,22 @@ def lambda_handler(event, context):
         connection_class=RequestsHttpConnection
     )
     
-    k =10
+    k = 10
     payload = event['searchString']
     
     # Debug event
     #print("event", event)
     
     filter_config = load_config()
-      
+
+    # Extract response variables
+    from_param = event.get('from', 0)
+    size_param = event.get('size', 10)
+    if int(size_param) == 0:
+        size = 10
+    sort_param = event.get('sort', "relevancy")
+    order_param = event.get('order', "desc")
+
     # Extract filters from the event input
     organization_filter = event.get('org', None)
     metadata_source_filter = event.get('metadata_source', None)
@@ -290,7 +300,12 @@ def lambda_handler(event, context):
     if spatial_filter:
         spatial_field = filter_config["bbox"][0]
         filters.append(build_spatial_filter(spatial_field, spatial_filter, relation))
-
+    
+    # Sort param
+    if sort_param and order_param:
+        sort_param = build_sort_filter(sort_field=sort_param, sort_order=order_param)
+        #filters.append(build_sort_filter(sort_field=sort_param, sort_order=order_param))
+    
     # If no filters are specified, set filters to None
     filters = filters if filters else None
 
@@ -306,9 +321,11 @@ def lambda_handler(event, context):
         semantic_search = semantic_search_neighbors(
             features=features,
             os_client=os_client,
-            k_neighbors=k,
+            k_neighbors=size_param,
+            from_param=from_param,
             idx_name=model_name,
-            filters=filters
+            filters=filters,
+            sort_param=sort_param
         )
         
         #print(f'Type of the semantic response is {type(json.dumps(semantic_search))}')
@@ -493,3 +510,41 @@ def build_spatial_filter(geo_field, bbox, relation=None):
             }
         }
     }
+
+def build_sort_filter(sort_field="relevancy", sort_order="desc"):
+    """
+    Builds a dynamic sort parameter for OpenSearch based on a single field and order.
+
+    Args:
+        sort_field (str): The field to sort by (e.g., "relevancy", "date", "popularity", "title").
+                          Defaults to "relevancy" (_score) if not provided.
+        sort_order (str): The sort order ("asc" for ascending, "desc" for descending).
+                          Defaults to "desc".
+
+    Returns:
+        list: A sort parameter for OpenSearch or an empty list if no sort field is specified.
+
+    Raises:
+        ValueError: If the provided sort_field is unsupported.
+    """
+    # Valid sort fields
+    supported_sort_fields = ["_score", "date", "popularity", "title", "relevancy"]
+
+    # Map user-friendly "relevancy" to "_score"
+    if sort_field == "relevancy":
+        sort_field = "_score"
+
+    # Ensure the sort field is supported
+    if sort_field not in supported_sort_fields:
+        raise ValueError(
+            f"Unsupported sort field '{sort_field}'. "
+            f"Must be one of {supported_sort_fields}. Default is '_score' (relevancy)."
+        )
+
+    # Force relevance sorting to descending order
+    if sort_field == "_score":
+        sort_order = "desc"
+
+    return [
+        {sort_field: {"order": sort_order}}
+    ]
