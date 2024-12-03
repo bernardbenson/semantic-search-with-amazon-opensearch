@@ -257,6 +257,10 @@ def lambda_handler(event, context):
     start_date_filter = event.get('begin', None)
     end_date_filter = event.get('end', None)
 
+    # Spatial filters
+    spatial_filter = event.get('bbox', None)
+    relation = event.get('relation', None)
+
     # Convert filter string into list (handle multi-selection of filters) 
     #organization_list = [org.strip() for org in organization_filter.split(",")]
     
@@ -281,6 +285,11 @@ def lambda_handler(event, context):
     elif end_date_filter:
         end_field = filter_config["end"][0]
         filters.extend(build_date_filter(end_field, end_date=end_date_filter))
+    
+    # Spatial filters
+    if spatial_filter:
+        spatial_field = filter_config["bbox"][0]
+        filters.append(build_spatial_filter(spatial_field, spatial_filter, relation))
 
     # If no filters are specified, set filters to None
     filters = filters if filters else None
@@ -433,8 +442,8 @@ def build_date_filter(begin_field=None, end_field=None, start_date=None, end_dat
             })
 
     return date_filters
-    
-def build_spatial_filter(geo_field, bbox, relation="intersects"):
+
+def build_spatial_filter(geo_field, bbox, relation=None):
     """
     Builds a spatial filter for geo_shape fields based on a bounding box (bbox).
 
@@ -449,15 +458,29 @@ def build_spatial_filter(geo_field, bbox, relation="intersects"):
     Raises:
         ValueError: If the bbox is invalid or the relation is unsupported.
     """
+    if relation is None:
+        relation = "intersects"
+
     supported_relations = ["intersects", "disjoint", "within", "contains"]
-    
     if relation not in supported_relations:
         raise ValueError(f"Unsupported relation '{relation}'. Must be one of {supported_relations}.")
 
+    try:
+        bbox = [float(val.strip()) for val in bbox.split("|") if val.strip()]
+    except ValueError:
+        raise ValueError("Invalid bbox format. Ensure it is a '|' separated string of numeric values.")    
+
     if not bbox or len(bbox) != 4:
-        raise ValueError("Invalid bbox. Expected a list with four coordinates: [min_lon, min_lat, max_lon, max_lat].")
+        raise ValueError("Invalid bbox. Expected four coordinates: \n"
+                         "min_lon (west) |min_lat (south) | max_lon (east) |max_lat (north)")
 
     min_lon, min_lat, max_lon, max_lat = bbox
+
+    # Validate ranges
+    if not (-180 <= min_lon <= 180 and -180 <= max_lon <= 180):
+        raise ValueError("Longitude values must be between -180 and 180.")
+    if not (-90 <= min_lat <= 90 and -90 <= max_lat <= 90):
+        raise ValueError("Latitude values must be between -90 and 90.")
 
     return {
         "geo_shape": {

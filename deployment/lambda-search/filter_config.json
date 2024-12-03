@@ -4,7 +4,7 @@
         "contact.organisation.fr.keyword"
     ],
     "theme": [
-        "contact.keywords.en.keyword",
+        "contact.keywords.en.keyword"
     ],
     "org": [
         "contact.organisation.en.keyword",
@@ -31,5 +31,8 @@
     ],
     "end": [
         "temporalExtent.end"
+    ],
+    "bbox": [
+        "coordinates"
     ]
 }
