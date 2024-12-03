@@ -433,3 +433,40 @@ def build_date_filter(begin_field=None, end_field=None, start_date=None, end_dat
             })
 
     return date_filters
+    
+def build_spatial_filter(geo_field, bbox, relation="intersects"):
+    """
+    Builds a spatial filter for geo_shape fields based on a bounding box (bbox).
+
+    Args:
+        geo_field (str): The geo_shape field name from the mapping configuration.
+        bbox (list): A list of four coordinates defining the bounding box [min_lon, min_lat, max_lon, max_lat].
+        relation (str): The spatial relation for the filter. Defaults to 'intersects'.
+
+    Returns:
+        dict: A geo_shape query using the 'envelope' type.
+
+    Raises:
+        ValueError: If the bbox is invalid or the relation is unsupported.
+    """
+    supported_relations = ["intersects", "disjoint", "within", "contains"]
+    
+    if relation not in supported_relations:
+        raise ValueError(f"Unsupported relation '{relation}'. Must be one of {supported_relations}.")
+
+    if not bbox or len(bbox) != 4:
+        raise ValueError("Invalid bbox. Expected a list with four coordinates: [min_lon, min_lat, max_lon, max_lat].")
+
+    min_lon, min_lat, max_lon, max_lat = bbox
+
+    return {
+        "geo_shape": {
+            geo_field: {
+                "shape": {
+                    "type": "envelope",
+                    "coordinates": [[min_lon, max_lat], [max_lon, min_lat]]
+                },
+                "relation": relation
+            }
+        }
+    }
