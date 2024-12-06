@@ -434,7 +434,7 @@ Resources:
                   application/json: |
                     {
                       "method": "$input.params('method')",
-                      "searchString": "$input.params('searchString')",
+                      "q": "$input.params('q')",
                       "bbox": "$input.params('bbox')",
                       "relation": "$input.params('relation')",
                       "begin": "$input.params('begin')",

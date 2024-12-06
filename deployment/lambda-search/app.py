@@ -1,12 +1,13 @@
 import json
 import boto3
 
-
 from os import environ
 from datetime import datetime
 from urllib.parse import urlparse
 from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth
 from requests_aws4auth import AWS4Auth
+
+from filter_builder import *
 
 #Global variables for prod 
 region = environ['MY_AWS_REGION']
@@ -55,7 +56,7 @@ def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
         print(f"Error invoking SageMaker endpoint {sagemaker_endpoint}: {e}")
         
 
-def semantic_search_neighbors(features, os_client, sort_param, k_neighbors=30, from_param=0, idx_name=model_name, filters=None):
+def semantic_search_neighbors(features, os_client, sort_param, k_neighbors=30, from_param=0, idx_name=model_name, filters=None, size=10):
     """
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
@@ -75,7 +76,7 @@ def semantic_search_neighbors(features, os_client, sort_param, k_neighbors=30, f
                 "filter": filters if filters else []  # Apply filters
             }
         },
-        "size": k_neighbors,
+        "size": size,
         "from": from_param,
         "sort": sort_param
     }
@@ -244,7 +245,7 @@ def lambda_handler(event, context):
     )
     
     k = 10
-    payload = event['searchString']
+    payload = event['q']
     
     # Debug event
     #print("event", event)
@@ -253,9 +254,12 @@ def lambda_handler(event, context):
 
     # Extract response variables
     from_param = event.get('from', 0)
-    size_param = event.get('size', 10)
+    size = 10
+    size_param = event.get('size', 10)    
     if int(size_param) == 0:
         size = 10
+    else:
+        size = int(size_param)
     sort_param = event.get('sort', "relevancy")
     order_param = event.get('order', "desc")
 
@@ -321,11 +325,12 @@ def lambda_handler(event, context):
         semantic_search = semantic_search_neighbors(
             features=features,
             os_client=os_client,
-            k_neighbors=size_param,
+            k_neighbors=10,
             from_param=from_param,
             idx_name=model_name,
             filters=filters,
-            sort_param=sort_param
+            sort_param=sort_param,
+            size=size
         )
         
         #print(f'Type of the semantic response is {type(json.dumps(semantic_search))}')
@@ -343,208 +348,3 @@ def lambda_handler(event, context):
             "statusCode": 200,
             "body": json.dumps({"keyword_response": search}),
         }
-
-def build_wildcard_filter(field_paths, values):
-    """
-    Builds a wildcard OR filter for multiple field paths and values.
-
-    Args:
-        field_paths (list): List of field paths from configuration.
-        values (str): A comma-separated string of values to filter.
-
-    Returns:
-        dict: A bool query with should clauses for logical OR.
-    """
-    value_list = [val.strip() for val in values.split(",") if val.strip()]
-
-    should_clauses = [
-        {"wildcard": {field_path: {"value": f"*{value}*"}}}
-        for value in value_list
-        for field_path in field_paths
-    ]
-
-    print(should_clauses)
-
-    return {
-        "bool": {
-            "should": should_clauses,
-            "minimum_should_match": 1
-        }
-    }
-
-def build_date_filter(begin_field=None, end_field=None, start_date=None, end_date=None):
-    """
-    Builds a string-based range filter for date fields supporting partial dates, 'null', 'not available; indisponible', and 'current'.
-
-    Args:
-        begin_field (str): Field name for the start date.
-        end_field (str): Field name for the end date.
-        start_date (str): The start date as a string.
-        end_date (str): The end date as a string.
-
-    Returns:
-        list: A list of range queries for the provided date fields.
-    """
-    date_filters = []
-    current_date = datetime.now().strftime('%Y-%m-%d')  # Current date in YYYY-MM-DD format
-
-    # Handle start date for `gte`
-    if start_date and start_date.lower() not in ['null', 'not available; indisponible']:
-        if len(start_date) == 7:  # YYYY-MM
-            start_date = f"{start_date}-01"  # Assume first day of the month
-        elif len(start_date) == 4:  # YYYY
-            start_date = f"{start_date}-01-01"  # Assume January 1st
-
-        date_filters.append({
-            "range": {
-                begin_field: {
-                    "gte": start_date
-                }
-            }
-        })
-
-    # Handle end date for `lte`
-    if end_date:
-        if end_date.lower() in ['null', 'not available; indisponible']:
-            # Optionally exclude these
-            date_filters.append({
-                "term": {
-                    end_field: "null"
-                }
-            })
-        elif end_date.lower() == "present":
-            # Treat 'present' as the current date and handle it separately
-            end_date = current_date
-            date_filters.append({
-                "range": {
-                    end_field: {
-                        "lte": end_date
-                    }
-                }
-            })
-
-            """
-            date_filters.append({
-                "bool": {
-                    "should": [
-                        {
-                            "range": {
-                                end_field: {
-                                    "lte": current_date  # Current date
-                                }
-                            }
-                        },
-                        {
-                            "term": {
-                                end_field: "Present"  # Exact "Present" match
-                            }
-                        }
-                    ]
-                }
-            })
-            """
-        elif len(end_date) == 7:  # YYYY-MM
-            end_date = f"{end_date}-31"  # Assume the last day of the month
-        elif len(end_date) == 4:  # YYYY
-            end_date = f"{end_date}-12-31"  # Assume December 31st
-
-        # Avoid duplicate queries if "present" is handled
-        if end_date.lower() != "present":
-            date_filters.append({
-                "range": {
-                    end_field: {
-                        "lte": end_date
-                    }
-                }
-            })
-
-    return date_filters
-
-def build_spatial_filter(geo_field, bbox, relation=None):
-    """
-    Builds a spatial filter for geo_shape fields based on a bounding box (bbox).
-
-    Args:
-        geo_field (str): The geo_shape field name from the mapping configuration.
-        bbox (list): A list of four coordinates defining the bounding box [min_lon, min_lat, max_lon, max_lat].
-        relation (str): The spatial relation for the filter. Defaults to 'intersects'.
-
-    Returns:
-        dict: A geo_shape query using the 'envelope' type.
-
-    Raises:
-        ValueError: If the bbox is invalid or the relation is unsupported.
-    """
-    if relation is None:
-        relation = "intersects"
-
-    supported_relations = ["intersects", "disjoint", "within", "contains"]
-    if relation not in supported_relations:
-        raise ValueError(f"Unsupported relation '{relation}'. Must be one of {supported_relations}.")
-
-    try:
-        bbox = [float(val.strip()) for val in bbox.split("|") if val.strip()]
-    except ValueError:
-        raise ValueError("Invalid bbox format. Ensure it is a '|' separated string of numeric values.")    
-
-    if not bbox or len(bbox) != 4:
-        raise ValueError("Invalid bbox. Expected four coordinates: \n"
-                         "min_lon (west) |min_lat (south) | max_lon (east) |max_lat (north)")
-
-    min_lon, min_lat, max_lon, max_lat = bbox
-
-    # Validate ranges
-    if not (-180 <= min_lon <= 180 and -180 <= max_lon <= 180):
-        raise ValueError("Longitude values must be between -180 and 180.")
-    if not (-90 <= min_lat <= 90 and -90 <= max_lat <= 90):
-        raise ValueError("Latitude values must be between -90 and 90.")
-
-    return {
-        "geo_shape": {
-            geo_field: {
-                "shape": {
-                    "type": "envelope",
-                    "coordinates": [[min_lon, max_lat], [max_lon, min_lat]]
-                },
-                "relation": relation
-            }
-        }
-    }
-
-def build_sort_filter(sort_field="relevancy", sort_order="desc"):
-    """
-    Builds a dynamic sort parameter for OpenSearch based on a single field and order.
-
-    Args:
-        sort_field (str): The field to sort by (e.g., "relevancy", "date", "popularity", "title").
-                          Defaults to "relevancy" (_score) if not provided.
-        sort_order (str): The sort order ("asc" for ascending, "desc" for descending).
-                          Defaults to "desc".
-
-    Returns:
-        list: A sort parameter for OpenSearch or an empty list if no sort field is specified.
-
-    Raises:
-        ValueError: If the provided sort_field is unsupported.
-    """
-    # Valid sort fields
-    supported_sort_fields = ["_score", "date", "popularity", "title", "relevancy"]
-
-    # Map user-friendly "relevancy" to "_score"
-    if sort_field == "relevancy":
-        sort_field = "_score"
-
-    # Ensure the sort field is supported
-    if sort_field not in supported_sort_fields:
-        raise ValueError(
-            f"Unsupported sort field '{sort_field}'. "
-            f"Must be one of {supported_sort_fields}. Default is '_score' (relevancy)."
-        )
-
-    # Force relevance sorting to descending order
-    if sort_field == "_score":
-        sort_order = "desc"
-
-    return [
-        {sort_field: {"order": sort_order}}
-    ]
