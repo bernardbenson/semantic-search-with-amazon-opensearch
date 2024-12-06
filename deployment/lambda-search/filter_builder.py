@@ -201,6 +201,12 @@ def build_sort_filter(sort_field="relevancy", sort_order="desc"):
     if sort_field == "_score":
         sort_order = "desc"
 
+    # OpenSearch doesn't like to sort 'text'. Make sure the 'keyword' instead
+    if sort_field == "title":
+        sort_field = "title.keyword"
+    if sort_field == "date":
+        sort_field = "published"
+
     return [
         {sort_field: {"order": sort_order}}
     ]

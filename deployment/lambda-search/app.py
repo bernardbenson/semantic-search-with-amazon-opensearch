@@ -62,17 +62,10 @@ def semantic_search_neighbors(features, os_client, sort_param, k_neighbors=30, f
     output: a list of json, each json contains _id, _score, title, and uuid 
     """
     #print("Filters:", json.dumps(filters, indent=2))
-    query={
+    query = {
         "query": {
             "bool": {
-                "must": {
-                    "knn": {
-                        "vector": {
-                            "vector": features,
-                            "k": k_neighbors
-                        }
-                    }
-                },
+                "must": [],
                 "filter": filters if filters else []  # Apply filters
             }
         },
@@ -81,6 +74,17 @@ def semantic_search_neighbors(features, os_client, sort_param, k_neighbors=30, f
         "sort": sort_param
     }
 
+    # Include the knn (i.e., vectors) only if features are provided in case of empty keyword query
+    if features:
+        query["query"]["bool"]["must"].append({
+            "knn": {
+                "vector": {
+                    "vector": features,
+                    "k": k_neighbors
+                }
+            }
+        })
+    
     print(json.dumps(query, indent=2))
     
     res = os_client.search(
@@ -169,8 +173,14 @@ def create_api_response(search_results):
     return response
 
 def create_api_response_geojson(search_results):
+
+    total_hits = search_results['hits']['total']['value'] if 'total' in search_results['hits'] else 0
+    returned_hits = len(search_results['hits']['hits'])
+
     response = {
-        "total_hits": len(search_results['hits']['hits']),
+
+        "total_hits": total_hits,        # Total docs matching the query
+        "returned_hits": returned_hits,  # Number of docs returned (limited by size)
         "items": []
     }
     
