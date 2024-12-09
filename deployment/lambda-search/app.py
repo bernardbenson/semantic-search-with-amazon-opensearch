@@ -273,32 +273,41 @@ def lambda_handler(event, context):
     sort_param = event.get('sort', "relevancy")
     order_param = event.get('order', "desc")
 
+    """ Keyword filters """
     # Extract filters from the event input
     organization_filter = event.get('org', None)
     metadata_source_filter = event.get('metadata_source', None)
+    theme_filter = event.get('theme', None)
+    type_filter = event.get('type', None)
 
-    # Temporal filters
+    """ Temporal filters """
     start_date_filter = event.get('begin', None)
     end_date_filter = event.get('end', None)
 
-    # Spatial filters
+    """ Spatial filters """
     spatial_filter = event.get('bbox', None)
     relation = event.get('relation', None)
 
     # Convert filter string into list (handle multi-selection of filters) 
     #organization_list = [org.strip() for org in organization_filter.split(",")]
     
+
     filters = []
+    """ Keyword filters """
     if organization_filter:
         organization_field = filter_config["org"]  # Get field paths from config
         print(organization_field)
         filters.append(build_wildcard_filter(organization_field, organization_filter))
     if metadata_source_filter:
         filters.extend({"term": {"metadata_source.keyword": metadata_source_filter}})
-
-    print("filters : ", filters)
-    
-    # Temporal filters
+    if theme_filter:
+        theme_field = filter_config["theme"]  # Get field paths from config
+        filters.append(build_wildcard_filter(theme_field, theme_filter))
+    if type_filter:
+        type_field = filter_config["type"]  # Get field paths from config
+        filters.append(build_wildcard_filter(type_field, type_filter))
+   
+    """ Temporal filters """
     if start_date_filter and end_date_filter:
         begin_field = filter_config["begin"][0]
         end_field = filter_config["end"][0]
@@ -310,7 +319,7 @@ def lambda_handler(event, context):
         end_field = filter_config["end"][0]
         filters.extend(build_date_filter(end_field, end_date=end_date_filter))
     
-    # Spatial filters
+    """ Spatial filters """
     if spatial_filter:
         spatial_field = filter_config["bbox"][0]
         filters.append(build_spatial_filter(spatial_field, spatial_filter, relation))

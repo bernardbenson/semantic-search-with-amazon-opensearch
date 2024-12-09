@@ -1,5 +1,15 @@
 {
-    "method": "SemanticSearch",
-     "searchString": "Riverice events in ottawa"
-   }
-   
+  "q": "",
+  "method": "SemanticSearch",
+  "_begin": "1900-01-01",
+  "_end": "2100",
+  "_org": "Natural Resources Canada, Environment and Climate",
+  "org": "",
+  "bbox": "-95.1562|41.6766|-74.3436|56.8562",
+  "relation": "within",
+  "size": 10,
+  "from": 0,
+  "sort": "date",
+  "order": "asc",
+  "theme": "imagery"
+}
