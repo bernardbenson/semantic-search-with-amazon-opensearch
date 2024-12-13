@@ -1,5 +1,6 @@
 import json
 import boto3
+import requests
 
 from os import environ
 from datetime import datetime
@@ -56,7 +57,7 @@ def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
         print(f"Error invoking SageMaker endpoint {sagemaker_endpoint}: {e}")
         
 
-def semantic_search_neighbors(features, os_client, sort_param, k_neighbors=30, from_param=0, idx_name=model_name, filters=None, size=10):
+def semantic_search_neighbors(lang, features, os_client, sort_param, k_neighbors=30, from_param=0, idx_name=model_name, filters=None, size=10):
     """
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
@@ -85,13 +86,12 @@ def semantic_search_neighbors(features, os_client, sort_param, k_neighbors=30, f
             }
         })
     
-    print(json.dumps(query, indent=2))
+    #print(json.dumps(query, indent=2))
     
     res = os_client.search(
         request_timeout=55, 
         index=idx_name,
         body=query)
-        
     
     # # Return a dataframe of the searched results, including title and uuid 
     # query_result = [
@@ -100,11 +100,11 @@ def semantic_search_neighbors(features, os_client, sort_param, k_neighbors=30, f
     # query_result_df = pd.DataFrame(data=query_result,columns=["_id","_score","title",'uuid'])
     # return query_result_df
 
-    api_response = create_api_response_geojson(res)
+    api_response = create_api_response_geojson(res, lang)
     #api_response = create_api_response(res)
     return api_response 
 
-def text_search_keywords(payload, os_client, k=30,idx_name=model_name):
+def text_search_keywords(lang, payload, os_client, k=30,idx_name=model_name):
     """
     Keyword search of the payload string 
     """
@@ -137,7 +137,7 @@ def text_search_keywords(payload, os_client, k=30,idx_name=model_name):
     # query_result_df = pd.DataFrame(data=query_result,columns=["_id","_score","title",'uuid'])
     # return query_result_df
     
-    api_response = create_api_response_geojson(res)
+    api_response = create_api_response_geojson(res, lang)
     return api_response 
 
 def add_to_top_of_dict(original_dict, key, value):
@@ -172,7 +172,7 @@ def create_api_response(search_results):
             print(f"Error processing hit: {e}")
     return response
 
-def create_api_response_geojson(search_results):
+def create_api_response_geojson(search_results, lang):
 
     total_hits = search_results['hits']['total']['value'] if 'total' in search_results['hits'] else 0
     returned_hits = len(search_results['hits']['hits'])
@@ -190,7 +190,18 @@ def create_api_response_geojson(search_results):
             source_data.pop('vector', None)
             source_data = add_to_top_of_dict(source_data, 'relevancy', hit.get('_score', ''))
             source_data = add_to_top_of_dict(source_data, 'row_num', count)
-            
+
+            #print(lang)
+            if lang == 'fr':  
+                uuid = source_data.get('id')
+                if uuid:
+                    title, description, keywords = language_config(uuid)
+                    #print(title)
+                    if title and description and keywords:
+                        source_data['title'] = title  
+                        source_data['description'] = description
+                        source_data['keywords'] = keywords
+                
             #Get geometry and delete geometry from the source_data
             geometry = source_data.get('coordinates')
             source_data.pop('coordinates')
@@ -273,6 +284,9 @@ def lambda_handler(event, context):
     sort_param = event.get('sort', "relevancy")
     order_param = event.get('order', "desc")
 
+    """ Language filter """
+    lang_filter = event.get('lang', 'en')
+
     """ Keyword filters """
     # Extract filters from the event input
     organization_filter = event.get('org', None)
@@ -296,7 +310,6 @@ def lambda_handler(event, context):
     """ Keyword filters """
     if organization_filter:
         organization_field = filter_config["org"]  # Get field paths from config
-        print(organization_field)
         filters.append(build_wildcard_filter(organization_field, organization_filter))
     if metadata_source_filter:
         filters.extend({"term": {"metadata_source.keyword": metadata_source_filter}})
@@ -332,7 +345,7 @@ def lambda_handler(event, context):
     # If no filters are specified, set filters to None
     filters = filters if filters else None
 
-    print("filters : ", filters)
+    #print("filters : ", filters)
     
     if event['method'] == 'SemanticSearch':
         #print(f'This is payload {payload}')
@@ -342,6 +355,7 @@ def lambda_handler(event, context):
         #print(f"Features retrieved from SageMaker: {features}")
         
         semantic_search = semantic_search_neighbors(
+            lang=lang_filter,
             features=features,
             os_client=os_client,
             k_neighbors=10,
@@ -349,7 +363,7 @@ def lambda_handler(event, context):
             idx_name=model_name,
             filters=filters,
             sort_param=sort_param,
-            size=size
+            size=size,
         )
         
         #print(f'Type of the semantic response is {type(json.dumps(semantic_search))}')
@@ -361,9 +375,32 @@ def lambda_handler(event, context):
         }
           
     else:
-        search = text_search_keywords(payload, os_client, k,idx_name=model_name)
+        search = text_search_keywords(lang, payload, os_client, k, idx_name=model_name)
 
         return {
             "statusCode": 200,
             "body": json.dumps({"keyword_response": search}),
         }
+
+def language_config(uuid):
+    url = f"https://geocore.api.geo.ca/id/v2?lang=fr&id={uuid}"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an error for HTTP codes 4xx/5xx
+        data = response.json()
+
+        # Extract French title and description
+        items = data.get("body", {}).get("Items", [])
+        if not items:
+            return {"error": "No items found in the response."}
+
+        item = items[0]  # We only care about the first item
+        title = item.get("title_fr", "Title not available in French.")
+        description = item.get("description", "Description not available.")
+        keywords = item.get("keywords", "Keyword not available.")
+
+        return title, description, keywords
+
+    except requests.exceptions.RequestException as e:
+        return {"error": str(e)}
