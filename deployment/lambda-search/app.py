@@ -15,7 +15,7 @@ region = environ['MY_AWS_REGION']
 aos_host = environ['OS_ENDPOINT'] 
 sagemaker_endpoint = environ['SAGEMAKER_ENDPOINT'] 
 os_secret_id = environ['OS_SECRET_ID']
-model_name = 'minilm-pretrain-knn'
+model_name = 'minilm-knn'
 
 def get_awsauth_from_secret(region, secret_id):
     """
@@ -264,6 +264,8 @@ def lambda_handler(event, context):
         verify_certs=True,
         connection_class=RequestsHttpConnection
     )
+
+    print(event)
     
     k = 10
     payload = event['q']
@@ -275,9 +277,17 @@ def lambda_handler(event, context):
 
     # Extract response variables
     from_param = event.get('from', 0)
+
+    # Validate 'from'
+    if not from_param or not str(from_param).isdigit():
+        from_param = 0
+    else:
+        from_param = int(from_param)
+
     size = 10
-    size_param = event.get('size', 10)    
-    if int(size_param) == 0:
+    size_param = event.get('size', '')
+
+    if not size_param or not size_param.isdigit():
         size = 10
     else:
         size = int(size_param)
@@ -338,9 +348,7 @@ def lambda_handler(event, context):
         filters.append(build_spatial_filter(spatial_field, spatial_filter, relation))
     
     # Sort param
-    if sort_param and order_param:
-        sort_param = build_sort_filter(sort_field=sort_param, sort_order=order_param)
-        #filters.append(build_sort_filter(sort_field=sort_param, sort_order=order_param))
+    sort_param = build_sort_filter(sort_field=sort_param, sort_order=order_param)
     
     # If no filters are specified, set filters to None
     filters = filters if filters else None

@@ -139,9 +139,9 @@ def build_spatial_filter(geo_field, bbox, relation=None):
         raise ValueError(f"Unsupported relation '{relation}'. Must be one of {supported_relations}.")
 
     try:
-        bbox = [float(val.strip()) for val in bbox.split("|") if val.strip()]
+        bbox = [float(val.strip()) for val in bbox.split(",") if val.strip()]
     except ValueError:
-        raise ValueError("Invalid bbox format. Ensure it is a '|' separated string of numeric values.")    
+        raise ValueError("Invalid bbox format. Ensure it is a ',' separated string of numeric values.")    
 
     if not bbox or len(bbox) != 4:
         raise ValueError("Invalid bbox. Expected four coordinates: \n"
@@ -168,6 +168,65 @@ def build_spatial_filter(geo_field, bbox, relation=None):
     }
 
 def build_sort_filter(sort_field="relevancy", sort_order="desc"):
+    """
+    Builds a dynamic sort parameter for OpenSearch based on a single field and order.
+
+    Args:
+        sort_field (str): The field to sort by (e.g., "relevancy", "date", "popularity", "title").
+                          Defaults to "relevancy" (maps to '_score') if not provided.
+        sort_order (str): The sort order ("asc" for ascending, "desc" for descending).
+                          Defaults to "desc". Forced to "desc" for relevancy.
+
+    Returns:
+        list: A valid sort parameter for OpenSearch.
+
+    Raises:
+        ValueError: If the provided sort_field is unsupported.
+    """
+
+    # Handle empty input strings by setting defaults
+    if not sort_field:
+        sort_field = "relevancy"  # Default sort field
+    if not sort_order:
+        sort_order = "desc"  # Default sort order
+
+    # Normalize input (case-insensitive)
+    sort_field = sort_field.lower()
+    sort_order = sort_order.lower()
+
+    # Supported sort fields
+    supported_sort_fields = ["_score", "date", "popularity", "title", "relevancy"]
+
+    # Map user-friendly "relevancy" to OpenSearch's "_score"
+    if sort_field == "relevancy":
+        sort_field = "_score"
+
+    # Validate the sort field
+    if sort_field not in supported_sort_fields:
+        raise ValueError(
+            f"Unsupported sort field '{sort_field}'. Supported fields are: {supported_sort_fields}."
+        )
+
+    # Enforce descending order for '_score' (relevance)
+    if sort_field == "_score":
+        sort_order = "desc"
+
+    # Adjust for specific OpenSearch requirements
+    field_mapping = {
+        "title": "title.keyword",  # Sort 'title' by its keyword version
+        "date": "published"        # Map 'date' to 'published'
+    }
+    sort_field = field_mapping.get(sort_field, sort_field)
+
+    # Ensure valid sort order
+    if sort_order not in ["asc", "desc"]:
+        raise ValueError("Invalid sort order. Must be 'asc' or 'desc'.")
+
+    # Return the sort parameter
+    print(sort_field, " ", sort_order)
+    return [{sort_field: {"order": sort_order}}]
+
+def build_sort_filter2(sort_field="relevancy", sort_order="desc"):
     """
     Builds a dynamic sort parameter for OpenSearch based on a single field and order.
 
