@@ -15,7 +15,7 @@ region = environ['MY_AWS_REGION']
 aos_host = environ['OS_ENDPOINT'] 
 sagemaker_endpoint = environ['SAGEMAKER_ENDPOINT'] 
 os_secret_id = environ['OS_SECRET_ID']
-model_name = 'minilm-knn'
+model_name = environ['MODEL_NAME']
 
 def get_awsauth_from_secret(region, secret_id):
     """
