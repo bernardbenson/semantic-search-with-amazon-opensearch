@@ -57,7 +57,7 @@ def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
         print(f"Error invoking SageMaker endpoint {sagemaker_endpoint}: {e}")
         
 
-def semantic_search_neighbors(lang, features, os_client, sort_param, k_neighbors=30, from_param=0, idx_name=model_name, filters=None, size=10):
+def semantic_search_neighbors(lang, search_text, features, os_client, sort_param, k_neighbors=30, from_param=0, idx_name=model_name, filters=None, size=10):
     """
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
@@ -83,6 +83,11 @@ def semantic_search_neighbors(lang, features, os_client, sort_param, k_neighbors
                     "vector": features,
                     "k": k_neighbors
                 }
+            }
+        })
+        query["query"]["bool"]["must"].append({
+            "match_all": {
+                "_name": search_text  # Embed search text as metadata
             }
         })
     
@@ -226,12 +231,7 @@ def create_api_response_geojson(search_results, lang):
 def load_config(file_path="filter_config.json"):
     """
         API Gateway
-        "north" : "$input.params('north')",
-        "east" : "$input.params('east')",
-        "south" : "$input.params('south')",
-        "west" : "$input.params('west')",
-        "keyword" : "$input.params('keyword')",
-        "keyword_only" : "$input.params('keyword_only')",
+        "q" : "$input.params('q')",
         "lang" : "$input.params('lang')",
         "theme" : "$input.params('theme')",
         "type": "$input.params('type')",
@@ -246,7 +246,7 @@ def load_config(file_path="filter_config.json"):
         "orbit_direction": "$input.params('orbit')",
         "begin": 2024-11-11T20:30:00.000Z
         "end": 2024-11-11T20:30:00.000Z
-        "bbox": 48|-121|61|-109
+        "bbox": 48,-121,61,-109
     """
     with open(file_path, "r") as file:
         return json.load(file)
@@ -265,7 +265,7 @@ def lambda_handler(event, context):
         connection_class=RequestsHttpConnection
     )
 
-    print(event)
+    #print(event)
     
     k = 10
     payload = event['q']
@@ -364,6 +364,7 @@ def lambda_handler(event, context):
         
         semantic_search = semantic_search_neighbors(
             lang=lang_filter,
+            search_text=payload,
             features=features,
             os_client=os_client,
             k_neighbors=10,
@@ -371,7 +372,7 @@ def lambda_handler(event, context):
             idx_name=model_name,
             filters=filters,
             sort_param=sort_param,
-            size=size,
+            size=size
         )
         
         #print(f'Type of the semantic response is {type(json.dumps(semantic_search))}')
