@@ -44,22 +44,70 @@ def create_opensearch_index(os_client, index_name):
         print(f"Index '{index_name}' already exists.")
         return None
 
+def delete_all_documents(os_client, index):
+    """
+    Deletes all documents in index
+    """
+
+    try:
+        # Perform the delete-by-query operation
+        response = os_client.delete_by_query(
+            index=index,
+            body={
+                "query": {
+                    "match_all": {}
+                }
+            }
+        )
+
+        # Extract the number of documents deleted
+        deleted_docs = response.get('deleted', 0)
+        print(f"Successfully deleted {deleted_docs} documents from index '{index}'.")
+    except Exception as e:
+        print(f"An error occurred while deleting documents: {e}")
+
 def fetch_log_streams(log_group_name):
     """
-    Fetch the log streams from the CloudWatch log group
+    Fetch the log streams from the CloudWatch log group, including pagination.
     """
     logs_client = boto3.client('logs')
-    response = logs_client.describe_log_streams(logGroupName=log_group_name, orderBy='LastEventTime', descending=True)
-    log_streams = response.get('logStreams', [])
+    paginator = logs_client.get_paginator('describe_log_streams')
+    
+    log_streams = []
+    for page in paginator.paginate(
+        logGroupName=log_group_name, 
+        orderBy='LastEventTime', 
+        descending=False
+    ):
+        log_streams.extend(page.get('logStreams', []))
+    
     return [stream['logStreamName'] for stream in log_streams]
 
 def fetch_log_events(log_group_name, log_stream_name):
     """
-    Fetch the log events from the log stream
+    Fetch all log events from a log stream, handling pagination to ensure all events are retrieved.
     """
     logs_client = boto3.client('logs')
-    response = logs_client.get_log_events(logGroupName=log_group_name, logStreamName=log_stream_name, limit=10000)
-    events = response.get('events', [])
+    events = dict()
+    next_token = None
+
+    params = dict(
+        logGroupName=log_group_name,
+        logStreamName=log_stream_name,
+        startFromHead=True
+    )
+
+    while next_token != events.get('nextForwardToken', ''):
+        next_token = events.get('nextForwardToken')
+        if next_token:
+            params["nextToken"] = next_token
+        
+        events = logs_client.get_log_events(**params)
+
+        for event in events.get('events'):
+            yield event
+        
+    print(f"Total events fetched: {len(events)}")
     return events
 
 def transform_logs(events):
@@ -67,12 +115,12 @@ def transform_logs(events):
     Transforms raw log events to include only the required fields
     """
     transformed_logs = []
+    event_iter = 0
     for event in events:
-        print("event: ", event)
+        event_iter += 1
 
         # Extract timestamp
         timestamp = event.get("timestamp")
-        print("timestamp ", timestamp)
 
         # Extract raw message
         raw_message = event.get("message")
@@ -105,8 +153,8 @@ def transform_logs(events):
             print("No valid source JSON found in the message")
 
         # Print extracted values for debugging
-        print("filters ", filters)
-        print("_name ", _name)
+        #print("filters ", filters)
+        #print("_name ", _name)
 
         # Append transformed log
         transformed_logs.append({
@@ -114,6 +162,7 @@ def transform_logs(events):
             'filters_applied': filters, 
             'search_string': _name
         })
+    print("Total events processed: ", event_iter)
     
     return transformed_logs
 
@@ -123,7 +172,6 @@ def save_to_opensearch(os_client, index, documents):
     """
     for doc in documents:
         response = os_client.index(index=index, body=doc)
-        print(f"Document saved to OpenSearch: {response['_id']}")
 
 def lambda_handler(event, context):
     """
@@ -158,15 +206,16 @@ def lambda_handler(event, context):
         # Ensure the new OpenSearch index exists
         create_opensearch_index(os_client, new_index_name)
 
+        # Delete all documents in the index to rebuild logs
+        delete_all_documents(os_client, new_index_name)
+
         # Fetch log streams from the CloudWatch log group
         log_streams = fetch_log_streams(log_group_name)
-        #print(log_streams)
 
         excluded_streams = {'es-test-log-stream', 'cust-test-log-stream'} #created automatically by OpenSearch
         for log_stream_name in log_streams:
             if log_stream_name not in excluded_streams:
                 # Fetch log events from each log stream
-                #print(log_stream_name)
                 events = fetch_log_events(log_group_name, log_stream_name)
                 #print(events)
                 
