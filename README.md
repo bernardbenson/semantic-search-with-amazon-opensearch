@@ -38,6 +38,7 @@ GET /search-opensearch?method=SemanticSearch&q=
 ## Filter parameters
 Search filters can be found below. For the most recent filter list, please refer to the CloudFormation template on the prod branch: [geocore-semantic-search-with-opensearch.yml](https://github.com/Canadian-Geospatial-Platform/geocore/blob/prod/docs/cloudformation/geocore-semantic-search-with-opensearch.yml)
 
+```bash
 {
     "method": "$input.params('method')",                          #mandatory: either SemanticSearch or KeywordSearch
     "q": "$input.params('q')",                                    #all other parameters are optional
@@ -59,6 +60,7 @@ Search filters can be found below. For the most recent filter list, please refer
     "size": "$input.params('size')",                              #maximum results returned
     "from": "$input.params('from')"                               #used for pagination
 }
+```
 
 ### Example
 ```bash
