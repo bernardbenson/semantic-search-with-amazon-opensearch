@@ -70,9 +70,10 @@ def fetch_log_streams(log_group_name):
     """
     Fetch the log streams from the CloudWatch log group, including pagination.
     """
+
     logs_client = boto3.client('logs')
     paginator = logs_client.get_paginator('describe_log_streams')
-    
+   
     log_streams = []
     for page in paginator.paginate(
         logGroupName=log_group_name, 
@@ -83,18 +84,28 @@ def fetch_log_streams(log_group_name):
     
     return [stream['logStreamName'] for stream in log_streams]
 
-def fetch_log_events(log_group_name, log_stream_name):
+def fetch_log_events(log_group_name, log_stream_name, time_threshold):
     """
     Fetch all log events from a log stream, handling pagination to ensure all events are retrieved.
     """
     logs_client = boto3.client('logs')
+
+    if time_threshold is None:
+        start_time = int((datetime.utcnow() - timedelta(minutes=120)).timestamp() * 1000)
+    else:
+        start_time = int((datetime.utcnow() - timedelta(minutes=time_threshold)).timestamp() * 1000)
+
+    end_time = int(datetime.utcnow().timestamp() * 1000)
+
     events = dict()
     next_token = None
 
     params = dict(
         logGroupName=log_group_name,
         logStreamName=log_stream_name,
-        startFromHead=True
+        startFromHead=True,
+        startTime=start_time,
+        endTime=end_time
     )
 
     while next_token != events.get('nextForwardToken', ''):
@@ -184,19 +195,7 @@ def lambda_handler(event, context):
     new_index_name = os.environ['NEW_INDEX_NAME']
     os_secret_id = os.environ['OS_SECRET_ID']
     log_group_name = os.environ['CLOUDWATCH_LOG_GROUP'] 
-
-    # Get OpenSearch credentials from AWS Secrets Manager
-    #awsauth = get_awsauth_from_secret(region, secret_id=os_secret_id)
-    #if not awsauth:
-    #    return {
-    #        'Status': 'FAILED',
-    #        'Message': 'Failed to retrieve OpenSearch credentials from Secrets Manager'
-    #    }
-    
-    # Properly use AWS4Auth object for signing requests
-    #service = 'es'
-    #aws_auth = AWS4Auth(awsauth[0], awsauth[1], region, service)
-    #print(aws_auth)
+    time_threshold = int(os.environ['TIME_THRESHOLD'])
 
     # Use IAM credentials instead
     credentials = boto3.Session().get_credentials()
@@ -224,7 +223,7 @@ def lambda_handler(event, context):
         create_opensearch_index(os_client, new_index_name)
 
         # Delete all documents in the index to rebuild logs
-        delete_all_documents(os_client, new_index_name)
+        #delete_all_documents(os_client, new_index_name)
 
         # Fetch log streams from the CloudWatch log group
         log_streams = fetch_log_streams(log_group_name)
@@ -233,8 +232,7 @@ def lambda_handler(event, context):
         for log_stream_name in log_streams:
             if log_stream_name not in excluded_streams:
                 # Fetch log events from each log stream
-                events = fetch_log_events(log_group_name, log_stream_name)
-                #print(events)
+                events = fetch_log_events(log_group_name, log_stream_name, time_threshold)
                 
                 # Transform logs for OpenSearch indexing
                 transformed_logs = transform_logs(events)
