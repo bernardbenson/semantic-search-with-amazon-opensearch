@@ -2,7 +2,7 @@ import os
 import re
 import json
 import boto3
-from datetime import datetime
+from datetime import datetime, timedelta
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from requests_aws4auth import AWS4Auth
 
@@ -186,21 +186,38 @@ def lambda_handler(event, context):
     log_group_name = os.environ['CLOUDWATCH_LOG_GROUP'] 
 
     # Get OpenSearch credentials from AWS Secrets Manager
-    awsauth = get_awsauth_from_secret(region, secret_id=os_secret_id)
-    if not awsauth:
-        return {
-            'Status': 'FAILED',
-            'Message': 'Failed to retrieve OpenSearch credentials from Secrets Manager'
-        }
+    #awsauth = get_awsauth_from_secret(region, secret_id=os_secret_id)
+    #if not awsauth:
+    #    return {
+    #        'Status': 'FAILED',
+    #        'Message': 'Failed to retrieve OpenSearch credentials from Secrets Manager'
+    #    }
+    
+    # Properly use AWS4Auth object for signing requests
+    #service = 'es'
+    #aws_auth = AWS4Auth(awsauth[0], awsauth[1], region, service)
+    #print(aws_auth)
+
+    # Use IAM credentials instead
+    credentials = boto3.Session().get_credentials()
+    aws_auth = AWS4Auth(credentials.access_key, credentials.secret_key, region, 'es', session_token=credentials.token)
 
     # Initialize OpenSearch client
     os_client = OpenSearch(
         hosts=[{'host': aos_host, 'port': 443}],
-        http_auth=awsauth,
+        http_auth=aws_auth,
         use_ssl=True,
         verify_certs=True,
+        ssl_assert_hostname = False,
+        ssl_show_warn = False,
         connection_class=RequestsHttpConnection
     )
+
+    try:
+        response = os_client.info()
+        print("OpenSearch Connected:", response)
+    except Exception as e:
+        print("OpenSearch Connection Failed:", e)
 
     try:
         # Ensure the new OpenSearch index exists

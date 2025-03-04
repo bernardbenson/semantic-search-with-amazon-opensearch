@@ -7,6 +7,8 @@ import gzip
 import base64
 from io import BytesIO
 
+from http.cookies import SimpleCookie
+
 region = os.environ['AWS_REGION']
 dashboard_endpoint = os.environ['DASHBOARD_ENDPOINT']  # e.g., "https://your-opensearch-domain/_dashboards"
 
@@ -16,18 +18,43 @@ credentials = session.get_credentials()
 aws_auth = AWS4Auth(credentials.access_key, credentials.secret_key, region, 'es', session_token=credentials.token)
 
 def lambda_handler(event, context):
-    print(event)
-    print(context)
+    #print(event)
+    #print(context)
     method = event.get('httpMethod', 'GET')
     path = event.get('path', '/_dashboards/app/home')
-    print(f"Request Path: {path}")
-    query_params = event.get('queryStringParameters', {})
+    #print(f"Request Path: {path}")
+    #query_params = event.get('queryStringParameters', {})
+    #multi_value_query_params = event.get('multiValueQueryStringParameters', {}) or {}
     headers = dict(event.get('headers', {}) or {})
 
+    # Handle query parameters, supporting multi-value params
+    single_query_params = event.get('queryStringParameters', {}) or {}
+    multi_query_params = event.get('multiValueQueryStringParameters', {}) or {}
+
+    #print("single_query_params", single_query_params)
+    #print("multi_query_params", multi_query_params)
+
+    # Initialize query_params as an empty dictionary
+    query_params = {}
+
+    # Add single query parameters (they are simple key-value pairs)
+    query_params.update(single_query_params)
+
+    # Check if multi_query_params is not None and not empty
+    if multi_query_params:
+        # Add multi-value query parameters
+        for key, value in multi_query_params.items():
+            query_params[key] = value  # Directly assign, multi-value parameters are already in a list
+
+    # Print the result
+    #print(query_params)
+    
+    """
     if method == "POST":
         print(f"POST Request Detected! Forwarding to {dashboard_endpoint}{path}")
     else:
         print("Not a POST request. Ignoring...")
+    """
 
     # Process request body
     raw_body = event.get('body', None)
@@ -35,13 +62,13 @@ def lambda_handler(event, context):
     
     # Check if body is base64 encoded
     if event.get("isBase64Encoded", False) and raw_body:
-        print("Decoding Base64 body...")
+        #print("Decoding Base64 body...")
         try:
             decoded_bytes = base64.b64decode(raw_body)
             body = decoded_bytes.decode("utf-8")
-            print(f"Decoded Body: {body[:500]}")  # Log first 500 chars for debugging
+            #print(f"Decoded Body: {body[:500]}")  # Log first 500 chars for debugging
         except Exception as e:
-            print(f"Base64 decoding failed: {e}")
+            #print(f"Base64 decoding failed: {e}")
             return {
                 "statusCode": 400,
                 "body": json.dumps({"error": "Invalid Base64 body"})
@@ -67,8 +94,16 @@ def lambda_handler(event, context):
     
     # Handle authentication headers
     auth_header = headers.get('Authorization', None)
-    cookies = headers.get('Cookie', '')
-    print(cookies)
+    cookie_header = headers.get('Cookie', '')
+
+    cookie_dict = {}
+
+    if cookie_header:
+        cookie = SimpleCookie()
+        cookie.load(cookie_header)
+        cookie_dict = {key: morsel.value.strip() for key, morsel in cookie.items()}
+        
+    #print(cookies)
     
     # Ensure the 'Authorization' header is forwarded if it exists
     forwarded_headers = {key: value for key, value in headers.items() if key.lower() not in ['host']}
@@ -77,13 +112,15 @@ def lambda_handler(event, context):
     forwarded_headers["Accept-Encoding"] = ""
     
     # Debugging logs
-    print(f"Method: {method}")
-    print(f"URL: {opensearch_url}")
-    print(f"auth: {aws_auth}")
-    print(f"Headers: {json.dumps(forwarded_headers, indent=2)}")
-    print(f"Query Params: {json.dumps(query_params, indent=2)}")
-    print(f"Body: {json.dumps(body, indent=2)}")
-    print("Making request to OpenSearch...")
+    #print(f"Method: {method}")
+    #print(f"URL: {opensearch_url}")
+    #print(f"auth: {aws_auth}")
+    #print(f"Headers: {forwarded_headers}")
+    #print(f"Query Params: {query_params}")
+    #print(f"Query Params type: {type(query_params)}")
+    #print(f"Body: {body}")
+    #print(f"Forwarded Cookies: {cookie_dict}")
+    #print("Making request to OpenSearch...")
     
     # Forward the request
     if method == 'GET':
@@ -93,18 +130,20 @@ def lambda_handler(event, context):
             auth=aws_auth,
             headers=forwarded_headers,
             params=query_params,
-            cookies={'security_authentication': cookies} if cookies else None,
+            cookies=cookie_dict,
+            #cookies={'security_authentication': cookies} if cookies else None,
             data=body,  # Ensure JSON body is properly formatted
             allow_redirects=False
         )
-    elif method == 'POST':
+    elif method == 'POST' or method == 'PUT' or method == 'DELETE':
         response = requests.request(
             method=method,
             url=opensearch_url,
             auth=aws_auth,
             headers=forwarded_headers,
             params=query_params,
-            cookies={'security_authentication': cookies} if cookies else None,
+            cookies=cookie_dict,
+            #cookies={'security_authentication': cookies} if cookies else None,
             json=body,  # Ensure JSON body is properly formatted
             allow_redirects=False
         )
