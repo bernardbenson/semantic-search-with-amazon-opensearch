@@ -9,6 +9,7 @@ from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth
 from requests_aws4auth import AWS4Auth
 
 from filter_builder import *
+from dashboard import *
 
 #Global variables for prod 
 region = environ['MY_AWS_REGION']
@@ -16,6 +17,7 @@ aos_host = environ['OS_ENDPOINT']
 sagemaker_endpoint = environ['SAGEMAKER_ENDPOINT'] 
 os_secret_id = environ['OS_SECRET_ID']
 model_name = environ['MODEL_NAME']
+search_index_name = environ['NEW_INDEX_NAME']
 
 def get_awsauth_from_secret(region, secret_id):
     """
@@ -57,7 +59,7 @@ def invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region):
         print(f"Error invoking SageMaker endpoint {sagemaker_endpoint}: {e}")
         
 
-def semantic_search_neighbors(lang, search_text, features, os_client, sort_param, k_neighbors=30, from_param=0, idx_name=model_name, filters=None, size=10):
+def semantic_search_neighbors(lang, search_text, features, os_client, sort_param, k_neighbors=50, from_param=0, idx_name=model_name, filters=None, size=10):
     """
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
@@ -97,6 +99,8 @@ def semantic_search_neighbors(lang, search_text, features, os_client, sort_param
         request_timeout=55, 
         index=idx_name,
         body=query)
+
+    print(res)
     
     # # Return a dataframe of the searched results, including title and uuid 
     # query_result = [
@@ -159,7 +163,7 @@ def add_to_top_of_dict(original_dict, key, value):
     new_dict.update(original_dict)
 
     return new_dict
-
+"""
 def create_api_response(search_results):
     response = {
         "total_hits": len(search_results['hits']['hits']),
@@ -176,7 +180,7 @@ def create_api_response(search_results):
         except Exception as e:
             print(f"Error processing hit: {e}")
     return response
-
+"""
 def create_api_response_geojson(search_results, lang):
 
     total_hits = search_results['hits']['total']['value'] if 'total' in search_results['hits'] else 0
@@ -256,7 +260,12 @@ def lambda_handler(event, context):
     /postText: Uses semantic search to find similar records based on vector similarity.
     Other paths: Uses a direct keyword text match to find matched records .
     """
-    awsauth = get_awsauth_from_secret(region, secret_id=os_secret_id)
+    #awsauth = get_awsauth_from_secret(region, secret_id=os_secret_id)
+    #print(awsauth)
+
+    credentials = boto3.Session().get_credentials()
+    awsauth = AWS4Auth(credentials.access_key, credentials.secret_key, region, 'es', session_token=credentials.token)
+
     os_client = OpenSearch(
         hosts=[{'host': aos_host, 'port': 443}],
         http_auth=awsauth,
@@ -268,10 +277,12 @@ def lambda_handler(event, context):
     #print(event)
     
     k = 10
-    payload = event['q']
+    payload = event.get('q', '') or ''
     
     # Debug event
     #print("event", event)
+
+
     
     filter_config = load_config()
 
@@ -348,12 +359,55 @@ def lambda_handler(event, context):
         filters.append(build_spatial_filter(spatial_field, spatial_filter, relation))
     
     # Sort param
-    sort_param = build_sort_filter(sort_field=sort_param, sort_order=order_param)
+    sort_param_final = build_sort_filter(sort_field=sort_param, sort_order=order_param)
     
     # If no filters are specified, set filters to None
     filters = filters if filters else None
 
     #print("filters : ", filters)
+
+    ####
+    #OpenSearch DashBoard code
+    ####
+    ip_address = event.get('ip_address', '') or ''
+    timestamp = event.get('timestamp', '') or ''
+    user_agent = event.get('user_agent', '') or ''
+    http_method = event.get('http_method', '') or ''
+
+    create_opensearch_index(os_client, search_index_name)
+    ip2geo_data = {}
+    ip2geo_data = ip2geo_handler(os_client, ip_address)
+    document = [
+        {
+            "timestamp": timestamp,
+            "lang": lang_filter,
+            "q": payload,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "http_method": http_method,
+            "sort_param": sort_param,
+            "order_param": order_param,
+            "organization_filter": organization_filter,
+            "metadata_source_filter": metadata_source_filter,
+            "theme_filter": theme_filter,
+            "type_filter": type_filter,
+            #"start_date_filter": start_date_filter,
+            #"end_date_filter": end_date_filter,
+            #"spatial_filter": spatial_filter,
+            "relation": relation,
+            "size": size,
+            "ip2geo": ip2geo_data
+        }
+    ]
+
+    print(f"Document to be indexed: {document}")
+    
+    save_to_opensearch(os_client, search_index_name, document)
+
+    ### End of OpenSearch DashBoard code
+
+    if event['method'] == 'postText':
+        payload = json.loads(event['body'])['text']
     
     if event['method'] == 'SemanticSearch':
         #print(f'This is payload {payload}')
@@ -367,11 +421,11 @@ def lambda_handler(event, context):
             search_text=payload,
             features=features,
             os_client=os_client,
-            k_neighbors=10,
+            k_neighbors=k,
             from_param=from_param,
             idx_name=model_name,
             filters=filters,
-            sort_param=sort_param,
+            sort_param=sort_param_final,
             size=size
         )
         
