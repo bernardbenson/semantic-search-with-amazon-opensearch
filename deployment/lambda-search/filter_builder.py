@@ -14,7 +14,14 @@ def build_wildcard_filter(field_paths, values):
     value_list = [val.strip() for val in values.split(",") if val.strip()]
 
     should_clauses = [
-        {"wildcard": {field_path: {"value": f"*{value}*"}}}
+        {
+            "wildcard": {
+                field_path: {
+                    "value": f"*{value}*",
+                    "case_insensitive": True
+                    }
+                }
+        }
         for value in value_list
         for field_path in field_paths
     ]
@@ -167,7 +174,7 @@ def build_spatial_filter(geo_field, bbox, relation=None):
         }
     }
 
-def build_sort_filter(sort_field="relevancy", sort_order="desc"):
+def build_sort_filter(lang_filter, sort_field="relevancy", sort_order="desc"):
     """
     Builds a dynamic sort parameter for OpenSearch based on a single field and order.
 
@@ -187,8 +194,11 @@ def build_sort_filter(sort_field="relevancy", sort_order="desc"):
     # Handle empty input strings by setting defaults
     if not sort_field:
         sort_field = "relevancy"  # Default sort field
+    if not sort_order and sort_field == "title":
+        sort_order = "asc"   # Makes for sense to have title sort alphabetically by default
     if not sort_order:
-        sort_order = "desc"  # Default sort order
+        sort_order = "desc"  # Otherwise, the default sort order is desc
+
 
     # Normalize input (case-insensitive)
     sort_field = sort_field.lower()
@@ -212,10 +222,19 @@ def build_sort_filter(sort_field="relevancy", sort_order="desc"):
         sort_order = "desc"
 
     # Adjust for specific OpenSearch requirements
-    field_mapping = {
-        "title": "title.keyword",  # Sort 'title' by its keyword version
-        "date": "published"        # Map 'date' to 'published'
-    }
+    field_mapping = {}
+    print("lang_filter", lang_filter)
+    if lang_filter == "en":
+        field_mapping = {
+            "title": "title_en.keyword",  # Sort 'title' by its keyword version
+            "date": "published"        # Map 'date' to 'published'
+        }
+    elif lang_filter == "fr":
+        field_mapping = {
+            "title": "title_fr.keyword",  # Sort 'title' by its keyword version
+            "date": "published"        # Map 'date' to 'published'
+        }
+    
     sort_field = field_mapping.get(sort_field, sort_field)
 
     # Ensure valid sort order
