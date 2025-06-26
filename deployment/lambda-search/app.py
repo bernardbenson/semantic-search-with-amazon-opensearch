@@ -74,25 +74,67 @@ def semantic_search_neighbors(lang, search_text, features, os_client, sort_param
         },
         "size": size,
         "from": from_param,
-        "sort": sort_param
+        "sort": sort_param,
+        "aggs": {
+            "unique_protocols": {
+                "terms": {
+                    "field": "options.protocol.keyword",
+                    "size": 100
+                }
+            },
+            "unique_organisations": {
+                "terms": {
+                    "field": "organisation.keyword",
+                    "size": 100
+                }
+            },
+            "unique_systemNames": {
+                "terms": {
+                    "field": "systemName.keyword",
+                    "size": 100
+                }
+            },
+            "unique_topicCategories": {
+                "terms": {
+                    "field": "topicCategory.keyword",
+                    "size": 100
+                }
+            }
+        }
     }
 
     # Include the knn (i.e., vectors) only if features are provided in case of empty keyword query
     if features:
-        query["query"]["bool"]["must"].append({
-            "knn": {
-                "vector": {
-                    "vector": features,
-                    "k": k_neighbors
+        #Note: this is technically a hybrid search
+        query["query"]["bool"]["should"] = [
+            {
+                "multi_match": {
+                    "query": search_text,
+                    "fields": ["*topicCategory*", "*keywords*^5", "*description*^15", "*title*^10", "*organisation*", "*systemName*", "*id*^5"],  # Boost title field
+                    "type": "best_fields",  # BM25 scoring
+                    "boost": 0.007
+                }
+            },
+            {
+                "knn": {
+                    "vector": {
+                        "vector": features,
+                        "k": k_neighbors
+                    }
                 }
             }
-        })
-        query["query"]["bool"]["must"].append({
-            "match_all": {
-                "_name": search_text  # Embed search text as metadata
-            }
-        })
-    
+        ]
+        query["query"]["bool"]["minimum_should_match"] = 1 # Ensure at least one match        
+
+        
+        # Embed search text as metadata in the logs, doesn't do anything. Otherwise we would only log the vectors
+        #query["query"]["bool"]["must"].append({
+        #    "match_all": {
+        #        "_name": search_text  # Embed search text as metadata
+        #    }
+        #})
+        query["min_score"] = 0.55
+            
     #print(json.dumps(query, indent=2))
     
     res = os_client.search(
@@ -100,7 +142,7 @@ def semantic_search_neighbors(lang, search_text, features, os_client, sort_param
         index=idx_name,
         body=query)
 
-    print(res)
+    #print(res)
     
     # # Return a dataframe of the searched results, including title and uuid 
     # query_result = [
@@ -190,6 +232,7 @@ def create_api_response_geojson(search_results, lang):
 
         "total_hits": total_hits,        # Total docs matching the query
         "returned_hits": returned_hits,  # Number of docs returned (limited by size)
+        "aggs": search_results.get("aggregations", {}),
         "items": []
     }
     
@@ -201,15 +244,15 @@ def create_api_response_geojson(search_results, lang):
             source_data = add_to_top_of_dict(source_data, 'row_num', count)
 
             #print(lang)
-            if lang == 'fr':  
-                uuid = source_data.get('id')
-                if uuid:
-                    title, description, keywords = language_config(uuid)
-                    #print(title)
-                    if title and description and keywords:
-                        source_data['title'] = title  
-                        source_data['description'] = description
-                        source_data['keywords'] = keywords
+            #if lang == 'fr':  
+            #    uuid = source_data.get('id')
+            #    if uuid:
+            #        title, description, keywords = language_config(uuid)
+            #        #print(title)
+            #        if title and description and keywords:
+            #            source_data['title'] = title  
+            #            source_data['description'] = description
+            #            source_data['keywords'] = keywords
                 
             #Get geometry and delete geometry from the source_data
             geometry = source_data.get('coordinates')
@@ -280,10 +323,9 @@ def lambda_handler(event, context):
     payload = event.get('q', '') or ''
     
     # Debug event
-    #print("event", event)
-
-
+    print("event", event)
     
+    # Load filter config from filter_config.json
     filter_config = load_config()
 
     # Extract response variables
@@ -307,13 +349,19 @@ def lambda_handler(event, context):
 
     """ Language filter """
     lang_filter = event.get('lang', 'en')
+    if not lang_filter:
+        lang_filter = 'en'
 
     """ Keyword filters """
     # Extract filters from the event input
     organization_filter = event.get('org', None)
-    metadata_source_filter = event.get('metadata_source', None)
+    metadata_source_filter = event.get('source_system', None)
     theme_filter = event.get('theme', None)
     type_filter = event.get('type', None)
+    protocol_filter = event.get('protocol', None)
+    eoCollection_filter = event.get('eo_collection', None)
+    polarization_filter = event.get('polarization', None)
+    orbit_direction_filter = event.get('orbit_direction', None)
 
     """ Temporal filters """
     start_date_filter = event.get('begin', None)
@@ -333,13 +381,26 @@ def lambda_handler(event, context):
         organization_field = filter_config["org"]  # Get field paths from config
         filters.append(build_wildcard_filter(organization_field, organization_filter))
     if metadata_source_filter:
-        filters.extend({"term": {"metadata_source.keyword": metadata_source_filter}})
+        source_system_field = filter_config["source_system"]  # Get field paths from config
+        filters.append(build_wildcard_filter(source_system_field, metadata_source_filter))
     if theme_filter:
         theme_field = filter_config["theme"]  # Get field paths from config
         filters.append(build_wildcard_filter(theme_field, theme_filter))
     if type_filter:
         type_field = filter_config["type"]  # Get field paths from config
         filters.append(build_wildcard_filter(type_field, type_filter))
+    if protocol_filter:
+        protocol_field = filter_config["protocol"]  # Get field paths from config
+        filters.append(build_wildcard_filter(protocol_field, protocol_filter))
+    if eoCollection_filter:
+        eo_collection_field = filter_config["eo_collection"]  # Get field paths from config
+        filters.append(build_wildcard_filter(eo_collection_field, eoCollection_filter))
+    if polarization_filter:
+        polarization_field = filter_config["polarization"]  # Get field paths from config
+        filters.append(build_wildcard_filter(polarization_field, polarization_filter))
+    if orbit_direction_filter:
+        orbit_direction_field = filter_config["orbit_direction"]  # Get field paths from config
+        filters.append(build_wildcard_filter(orbit_direction_field, orbit_direction_filter))
    
     """ Temporal filters """
     if start_date_filter and end_date_filter:
@@ -359,12 +420,12 @@ def lambda_handler(event, context):
         filters.append(build_spatial_filter(spatial_field, spatial_filter, relation))
     
     # Sort param
-    sort_param_final = build_sort_filter(sort_field=sort_param, sort_order=order_param)
+    sort_param_final = build_sort_filter(lang_filter, sort_field=sort_param, sort_order=order_param)
     
     # If no filters are specified, set filters to None
     filters = filters if filters else None
 
-    #print("filters : ", filters)
+    print("filters : ", filters)
 
     ####
     #OpenSearch DashBoard code
@@ -413,9 +474,7 @@ def lambda_handler(event, context):
         #print(f'This is payload {payload}')
         
         features = invoke_sagemaker_endpoint(sagemaker_endpoint, payload, region)
-        #print(sagemaker_endpoint)
-        #print(f"Features retrieved from SageMaker: {features}")
-        
+       
         semantic_search = semantic_search_neighbors(
             lang=lang_filter,
             search_text=payload,
@@ -426,19 +485,15 @@ def lambda_handler(event, context):
             idx_name=model_name,
             filters=filters,
             sort_param=sort_param_final,
-            size=size
+            size=size            
         )
-        
-        #print(f'Type of the semantic response is {type(json.dumps(semantic_search))}')
-        #print(json.dumps(semantic_search))
         
         return {
             "method": "SemanticSearch", 
             "response": semantic_search
-        }
-          
+        }         
     else:
-        search = text_search_keywords(lang, payload, os_client, k, idx_name=model_name)
+        search = text_search_keywords(lang_filter, payload, os_client, k, idx_name=model_name)
 
         return {
             "statusCode": 200,
