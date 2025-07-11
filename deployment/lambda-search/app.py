@@ -64,6 +64,9 @@ def semantic_search_neighbors(lang, search_text, features, os_client, sort_param
     Perform semantic search and get neighbots using the cosine similarity of the vectors 
     output: a list of json, each json contains _id, _score, title, and uuid 
     """
+    filter_config = load_config()
+    # Correct language suffix
+    org_field_lang = "organisation.en.keyword" if lang == "en" else "organisation.fr.keyword"
     #print("Filters:", json.dumps(filters, indent=2))
     query = {
         "query": {
@@ -76,27 +79,45 @@ def semantic_search_neighbors(lang, search_text, features, os_client, sort_param
         "from": from_param,
         "sort": sort_param,
         "aggs": {
-            "unique_protocols": {
+            "unique_mappable": {
                 "terms": {
-                    "field": "options.protocol.keyword",
+                    "field": filter_config["mappable"][0],
                     "size": 100
                 }
             },
-            "unique_organisations": {
+            "unique_protocol": {
                 "terms": {
-                    "field": "organisation.keyword",
+                    "field": filter_config["protocol"][0],
                     "size": 100
                 }
             },
-            "unique_systemNames": {
+            "unique_org": {
                 "terms": {
-                    "field": "systemName.keyword",
+                    "field": org_field_lang,
                     "size": 100
                 }
             },
-            "unique_topicCategories": {
+            "unique_source_system": {
                 "terms": {
-                    "field": "topicCategory.keyword",
+                    "field": filter_config["source_system"][0],
+                    "size": 100
+                }
+            },
+            "unique_eo_collection": {
+                "terms": {
+                    "field": filter_config["eo_collection"][0],
+                    "size": 100
+                }
+            },
+            "unique_topic_category": {
+                "terms": {
+                    "field": filter_config["topic_category"][0],
+                    "size": 100
+                }
+            },
+            "unique_theme": {
+                "terms": {
+                    "field": filter_config["theme"][0],
                     "size": 100
                 }
             }
@@ -113,6 +134,14 @@ def semantic_search_neighbors(lang, search_text, features, os_client, sort_param
                     "fields": ["*topicCategory*", "*keywords*^5", "*description*^15", "*title*^10", "*organisation*", "*systemName*", "*id*^5"],  # Boost title field
                     "type": "best_fields",  # BM25 scoring
                     "boost": 0.007
+                }
+            },
+            {
+                "term": {
+                    "mappable": {
+                        "value": True,
+                        "boost": 0.15   # adjust boost as needed
+                    }
                 }
             },
             {
@@ -278,22 +307,34 @@ def create_api_response_geojson(search_results, lang):
 def load_config(file_path="filter_config.json"):
     """
         API Gateway
-        "q" : "$input.params('q')",
-        "lang" : "$input.params('lang')",
-        "theme" : "$input.params('theme')",
-        "type": "$input.params('type')",
+        {
+        "method": "$input.params('method')",
+        "q": "$input.params('q')",
+        "bbox": "$input.params('bbox')",
+        "relation": "$input.params('relation')",
+        "begin": "$input.params('begin')",
+        "end": "$input.params('end')",
         "org": "$input.params('org')",
-        "min": "$input.params('min')",
-        "max": "$input.params('max')",
-        "foundational": "$input.params('foundational')" ,
+        "type": "$input.params('type')",
+        "protocol": "$input.params('protocol')",
+        "mappable": "$input.params('mappable')",
+        "theme": "$input.params('theme')",
+        "topic_category": "$input.params('topic_category')",
+        "foundational": "$input.params('foundational')",
+        "source_system": "$input.params('source_system')",
+        "eo_collection": "$input.params('eo_collection')",
+        "polarization": "$input.params('polarization')",
+        "orbit_direction": "$input.params('orbit_direction')",
+        "lang": "$input.params('lang')",
         "sort": "$input.params('sort')",
-        "source_system": "$input.params('sourcesystemname')" ,
-        "eo_collection": "$input.params('eocollection')" ,
-        "polarization": "$input.params('polarization')" ,
-        "orbit_direction": "$input.params('orbit')",
-        "begin": 2024-11-11T20:30:00.000Z
-        "end": 2024-11-11T20:30:00.000Z
-        "bbox": 48,-121,61,-109
+        "order": "$input.params('order')",
+        "size": "$input.params('size')",
+        "from": "$input.params('from')",
+        "ip_address": "$context.identity.sourceIp",
+        "timestamp": "$context.requestTimeEpoch",
+        "user_agent": "$context.identity.userAgent",
+        "http_method": "$context.httpMethod"
+        }
     """
     with open(file_path, "r") as file:
         return json.load(file)
@@ -321,9 +362,11 @@ def lambda_handler(event, context):
     
     k = 10
     payload = event.get('q', '') or ''
+    if not payload:
+        event['sort'] = "popularity"
     
     # Debug event
-    print("event", event)
+    #print("event", event)
     
     # Load filter config from filter_config.json
     filter_config = load_config()
@@ -357,8 +400,10 @@ def lambda_handler(event, context):
     organization_filter = event.get('org', None)
     metadata_source_filter = event.get('source_system', None)
     theme_filter = event.get('theme', None)
+    topicCategory_filter = event.get('topic_category', None)
     type_filter = event.get('type', None)
     protocol_filter = event.get('protocol', None)
+    mappable_filter = event.get('mappable', None)
     eoCollection_filter = event.get('eo_collection', None)
     polarization_filter = event.get('polarization', None)
     orbit_direction_filter = event.get('orbit_direction', None)
@@ -386,12 +431,18 @@ def lambda_handler(event, context):
     if theme_filter:
         theme_field = filter_config["theme"]  # Get field paths from config
         filters.append(build_wildcard_filter(theme_field, theme_filter))
+    if topicCategory_filter:
+        topicCategory_field = filter_config["topic_category"]  # Get field paths from config
+        filters.append(build_wildcard_filter(topicCategory_field, topicCategory_filter))
     if type_filter:
         type_field = filter_config["type"]  # Get field paths from config
         filters.append(build_wildcard_filter(type_field, type_filter))
     if protocol_filter:
         protocol_field = filter_config["protocol"]  # Get field paths from config
         filters.append(build_wildcard_filter(protocol_field, protocol_filter))
+    if mappable_filter:
+        mappable_field = filter_config["mappable"]  # Get field paths from config
+        filters.append(build_wildcard_filter(mappable_field, mappable_filter))
     if eoCollection_filter:
         eo_collection_field = filter_config["eo_collection"]  # Get field paths from config
         filters.append(build_wildcard_filter(eo_collection_field, eoCollection_filter))
