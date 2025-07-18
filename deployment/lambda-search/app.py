@@ -482,6 +482,14 @@ def lambda_handler(event, context):
     #OpenSearch DashBoard code
     ####
     ip_address = event.get('ip_address', '') or ''
+    ip_address_forward = event.get('ip_address_forward', '') or ''
+    print("ip_address_forward", ip_address_forward)
+
+    if ip_address_forward:
+        ip_address = ip_address_forward.split(',')[0].strip() #Use first forwarded IP address if it exists
+    
+    print("ip_address", ip_address)
+
     timestamp = event.get('timestamp', '') or ''
     user_agent = event.get('user_agent', '') or ''
     http_method = event.get('http_method', '') or ''
@@ -494,7 +502,6 @@ def lambda_handler(event, context):
             "timestamp": timestamp,
             "lang": lang_filter,
             "q": payload,
-            "ip_address": ip_address,
             "user_agent": user_agent,
             "http_method": http_method,
             "sort_param": sort_param,
